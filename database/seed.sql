@@ -66,3 +66,20 @@ FROM psychologist_profiles p JOIN users u ON u.id = p.user_id WHERE u.email = 's
 INSERT INTO schedule_slots (psychologist_id, slot_date, start_time, end_time, format, status)
 SELECT p.id, CURDATE() + INTERVAL 3 DAY, '13:00:00', '13:40:00', 'individual', 'free'
 FROM psychologist_profiles p JOIN users u ON u.id = p.user_id WHERE u.email = 'sergeev@example.com';
+
+-- Контакты (раздел "Ссылки")
+INSERT INTO contacts (title, value, type) VALUES
+    ('Телефон экстренной помощи', '8-800-2000-122', 'phone'),
+    ('ЦСИ «Пирамиды»', '+7 900 000-00-00', 'phone'),
+    ('ВК кафедры психологии', 'https://vk.com/example_dept', 'link');
+
+-- Пример объявления и памятки
+INSERT INTO announcements (kind, title, content, event_date, created_by)
+SELECT 'event', 'Групповое занятие по стресс-менеджменту',
+       'Встречаемся в ауд. 305, регистрация не нужна.', CURDATE() + INTERVAL 5 DAY, u.id
+FROM users u WHERE u.email = 'sergeev@example.com';
+
+INSERT INTO announcements (kind, title, content, created_by)
+SELECT 'info', 'Правила записи и отмены',
+       'Отменить запись можно не позднее чем за 24 часа. При экстренной ситуации звоните на телефон экстренной помощи.', u.id
+FROM users u WHERE u.email = 'filippova@example.com';

@@ -5,9 +5,6 @@ namespace App\Core;
 use PDO;
 use PDOException;
 
-/**
- * Простая обёртка над PDO. Одно подключение на весь запрос (singleton).
- */
 class Database
 {
     private static ?PDO $instance = null;

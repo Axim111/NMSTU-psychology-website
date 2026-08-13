@@ -66,6 +66,8 @@ CREATE TABLE schedule_slots (
     end_time        TIME NOT NULL,
     format          ENUM('individual', 'group', 'family') NOT NULL DEFAULT 'individual',
     status          ENUM('free', 'booked', 'blocked') NOT NULL DEFAULT 'free',
+    is_emergency_override BOOLEAN NOT NULL DEFAULT FALSE
+                    COMMENT 'слот добавлен сверх недельного лимита 9ч — экстренный случай',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (psychologist_id) REFERENCES psychologist_profiles(id) ON DELETE CASCADE,
     INDEX idx_slot_lookup (psychologist_id, slot_date, status)
@@ -102,6 +104,8 @@ CREATE TABLE appointment_notes (
 -- ------------------------------------------------------------
 CREATE TABLE announcements (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    kind            ENUM('event', 'info') NOT NULL DEFAULT 'event'
+                    COMMENT 'event — групповое мероприятие, info — правила/памятки (посещение, отмена, экстренная помощь)',
     title           VARCHAR(200) NOT NULL,
     content         TEXT NOT NULL,
     event_date      DATETIME NULL,
