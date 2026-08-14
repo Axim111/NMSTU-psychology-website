@@ -2,6 +2,10 @@
 
 namespace App\Core;
 
+/**
+ * Простая обёртка над $_SESSION. session_start() вызывается один раз
+ * в public/index.php до роутинга.
+ */
 class Auth
 {
     public static function login(array $user): void
@@ -37,6 +41,10 @@ class Auth
         return $_SESSION['user_name'] ?? null;
     }
 
+    /**
+     * Если роль не подходит — редиректит на /login (не залогинен)
+     * или отдаёт 403 (залогинен, но не та роль), и останавливает скрипт.
+     */
     public static function requireRole(string ...$roles): void
     {
         if (!self::check()) {

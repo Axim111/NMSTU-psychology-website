@@ -2,6 +2,11 @@
 
 namespace App\Core;
 
+/**
+ * Минимальный роутер без зависимостей.
+ * Пример регистрации в public/index.php:
+ *   $router->get('/', [HomeController::class, 'index']);
+ */
 class Router
 {
     private array $routes = [];

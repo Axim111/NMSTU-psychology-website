@@ -1,3 +1,14 @@
+<?php
+// Для подсветки активной вкладки нав-бара — как активный пункт меню на портале.
+$currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+function navActive(string $prefix, string $currentPath): string
+{
+    if ($prefix === '/') {
+        return $currentPath === '/' ? 'active' : '';
+    }
+    return str_starts_with($currentPath, $prefix) ? 'active' : '';
+}
+?>
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -8,11 +19,16 @@
 </head>
 <body>
 <header class="site-header">
-    <div class="container" style="display:flex;justify-content:space-between;align-items:center;">
-        <a href="/" class="logo">Центр психологической поддержки</a>
-        <div style="font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:12px;">
-            <a href="/announcements">Мероприятия</a>
-            <a href="/contacts">Ссылки</a>
+    <div class="header-inner">
+        <a href="/" class="logo">
+            <span class="logo-mark">Ц</span>
+            <span>Центр психологической поддержки</span>
+        </a>
+
+        <nav class="nav-tabs">
+            <a href="/" class="<?= navActive('/', $currentPath) ?>">Психологи</a>
+            <a href="/announcements" class="<?= navActive('/announcements', $currentPath) ?>">Мероприятия</a>
+            <a href="/contacts" class="<?= navActive('/contacts', $currentPath) ?>">Ссылки</a>
             <?php if (\App\Core\Auth::check()): ?>
                 <?php
                     $roleLink = match (\App\Core\Auth::role()) {
@@ -26,14 +42,19 @@
                         default => 'Мои записи',
                     };
                 ?>
-                <a href="<?= $roleLink ?>"><?= $roleLabel ?></a>
+                <a href="<?= $roleLink ?>" class="<?= navActive($roleLink, $currentPath) ?>"><?= $roleLabel ?></a>
                 <?php if (\App\Core\Auth::role() === 'psychologist'): ?>
-                    <a href="/dashboard/announcements">Объявления</a>
+                    <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Управление объявлениями</a>
                 <?php elseif (\App\Core\Auth::role() === 'admin'): ?>
-                    <a href="/dashboard/announcements">Объявления</a>
-                    <a href="/admin/contacts">Ссылки (упр.)</a>
+                    <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Объявления</a>
+                    <a href="/admin/contacts" class="<?= navActive('/admin/contacts', $currentPath) ?>">Ссылки (упр.)</a>
                 <?php endif; ?>
-                <span><?= htmlspecialchars(\App\Core\Auth::name()) ?></span>
+            <?php endif; ?>
+        </nav>
+
+        <div class="header-actions">
+            <?php if (\App\Core\Auth::check()): ?>
+                <span class="user-name"><?= htmlspecialchars(\App\Core\Auth::name()) ?></span>
                 <a href="/logout">Выйти</a>
             <?php else: ?>
                 <a href="/login">Вход для сотрудников</a>
