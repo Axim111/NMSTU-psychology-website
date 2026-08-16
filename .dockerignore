@@ -1,0 +1,15 @@
+# Исключаем лишнее из Docker-контекста
+
+.git
+.gitignore
+.idea
+.vscode
+_.md
+README.md
+out.txt
+pars.js
+node_modules
+docker/data
+logs
+_.log
+.DS_Store
