@@ -2,6 +2,10 @@
 -- Выполнить после schema.sql:
 --   mysql -u root psycho_booking < database/seed.sql
 
+-- Та же причина, что и в schema.sql — фиксируем кодировку клиента,
+-- иначе Docker-инициализация испортит кириллицу.
+SET NAMES utf8mb4;
+
 USE psycho_booking;
 
 -- Тестовый пароль для ВСЕХ аккаунтов ниже (психологи, админ, студенты): password123

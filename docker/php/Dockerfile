@@ -27,8 +27,23 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     gd \
     opcache
 
-# Очистка
-RUN apk del --no-cache libpng-dev libjpeg-turbo-dev freetype-dev oniguruma-dev libxml2-dev
+# Очистка (оставляем рантайм-библиотеки — apk del иначе вычищает и их
+# как "более не нужные" зависимости, а без них падает уже собранный gd:
+# "libpng16.so.16: No such file or directory")
+RUN apk del --no-cache libpng-dev libjpeg-turbo-dev freetype-dev oniguruma-dev libxml2-dev \
+    && apk add --no-cache libpng libjpeg-turbo freetype oniguruma libxml2
+
+# PHP-FPM по умолчанию обнуляет окружение для рабочих процессов
+# (clear_env = yes) — это означает, что переменные DB_HOST/DB_USER и
+# т.п. из docker-compose.yml видны через `docker compose exec php php -r`
+# (это отдельный CLI-процесс, окружение ему подставляется полностью),
+# но НЕ видны настоящим HTTP-запросам, которые обрабатывает FPM-воркер.
+# Без этой строки Database.php не находит переменные окружения,
+# откатывается на config.php (127.0.0.1) и получает
+# "SQLSTATE[HY000] [2002] Connection refused", потому что внутри
+# php-контейнера на 127.0.0.1:3306 никто не слушает — MySQL в
+# отдельном контейнере db.
+RUN sed -i 's/;clear_env = no/clear_env = no/' /usr/local/etc/php-fpm.d/www.conf
 
 # Копирование конфигурации PHP
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/zz-app.ini

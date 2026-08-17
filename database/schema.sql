@@ -3,6 +3,16 @@
 -- MySQL / MariaDB, InnoDB, utf8mb4
 -- ============================================================
 
+-- Явно фиксируем кодировку соединения клиента. Без этой строки
+-- Docker-контейнер MySQL (docker-entrypoint-initdb.d) импортирует файл
+-- через клиент с дефолтной локалью контейнера (часто не UTF-8) —
+-- кириллица превращается в кракозябры, даже если у самой БД
+-- character-set-server=utf8mb4. При обычном ручном импорте эту же
+-- проблему лечили флагом --default-character-set=utf8mb4 у команды
+-- mysql, но Docker сам решает, как запускать импорт, поэтому кодировку
+-- надёжнее зашить в сам файл.
+SET NAMES utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS psycho_booking
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
