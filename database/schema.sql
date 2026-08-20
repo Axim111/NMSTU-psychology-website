@@ -11,10 +11,11 @@
 -- проблему лечили флагом --default-character-set=utf8mb4 у команды
 -- mysql, но Docker сам решает, как запускать импорт, поэтому кодировку
 -- надёжнее зашить в сам файл.
-SET NAMES utf8mb4;
 
-CREATE DATABASE IF NOT EXISTS psycho_booking
-    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- SET NAMES utf8mb4;
+
+-- CREATE DATABASE IF NOT EXISTS psycho_booking
+--     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 USE psycho_booking;
 
