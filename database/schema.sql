@@ -133,3 +133,22 @@ CREATE TABLE contacts (
     value           VARCHAR(255) NOT NULL,
     type            ENUM('phone', 'link', 'text') NOT NULL DEFAULT 'text'
 ) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------
+-- Лог уведомлений (заглушка). Реальная отправка (почта портала,
+-- колокольчик на портале) пока не подключена — см.
+-- src/Core/Notifications/. Каждая "отправка" просто пишется сюда,
+-- чтобы было видно, что сработало бы и когда, до подключения
+-- настоящих каналов.
+-- ------------------------------------------------------------
+CREATE TABLE notification_log (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT UNSIGNED NOT NULL,
+    channel         ENUM('email', 'portal') NOT NULL,
+    subject         VARCHAR(200) NOT NULL,
+    message         TEXT NOT NULL,
+    status          ENUM('stub', 'sent', 'failed') NOT NULL DEFAULT 'stub'
+                    COMMENT 'stub — заглушка, реально никуда не отправлено',
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

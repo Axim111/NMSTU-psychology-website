@@ -86,4 +86,26 @@ class AdminController
 
         header('Location: /admin');
     }
+
+    /**
+     * GET /admin/notifications
+     * Заглушка-витрина: что бы отправилось по email/порталу, если бы
+     * каналы были подключены по-настоящему. Реальной отправки нет,
+     * это просто notification_log.
+     */
+    public function notifications(): void
+    {
+        Auth::requireRole('admin');
+
+        $items = Database::connection()->query(
+            "SELECT n.channel, n.subject, n.message, n.status, n.created_at,
+                    u.last_name, u.first_name
+             FROM notification_log n
+             JOIN users u ON u.id = n.user_id
+             ORDER BY n.created_at DESC
+             LIMIT 50"
+        )->fetchAll();
+
+        require __DIR__ . '/../../templates/admin/notifications.php';
+    }
 }

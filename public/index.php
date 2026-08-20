@@ -68,5 +68,6 @@ $router->post('/admin/contacts/delete', [ContactController::class, 'delete']);
 $router->get('/admin', [AdminController::class, 'index']);
 $router->get('/admin/psychologists/new', [AdminController::class, 'newPsychologistForm']);
 $router->post('/admin/psychologists', [AdminController::class, 'createPsychologist']);
+$router->get('/admin/notifications', [AdminController::class, 'notifications']);
 
 $router->dispatch($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI']);

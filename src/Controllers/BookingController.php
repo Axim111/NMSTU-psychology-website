@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
 use PDO;
 
 class BookingController
@@ -153,6 +154,24 @@ class BookingController
             http_response_code(500);
             echo 'Не получилось сохранить запись, попробуйте ещё раз.';
             return;
+        }
+
+        // Оповещение клиента о записи (заглушка — см. src/Core/Notifications/).
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([$clientId]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            $psychFullName = trim($slot['last_name'] . ' ' . $slot['first_name'] . ' ' . ($slot['patronymic'] ?? ''));
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Запись на приём подтверждена',
+                sprintf(
+                    'Вы записаны к психологу %s на %s в %s.',
+                    $psychFullName,
+                    date('d.m.Y', strtotime($slot['slot_date'])),
+                    substr($slot['start_time'], 0, 5)
+                )
+            );
         }
 
         require __DIR__ . '/../../templates/booking_confirmation.php';

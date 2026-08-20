@@ -48,6 +48,7 @@ function navActive(string $prefix, string $currentPath): string
                 <?php elseif (\App\Core\Auth::role() === 'admin'): ?>
                     <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Объявления</a>
                     <a href="/admin/contacts" class="<?= navActive('/admin/contacts', $currentPath) ?>">Ссылки (упр.)</a>
+                    <a href="/admin/notifications" class="<?= navActive('/admin/notifications', $currentPath) ?>">Уведомления</a>
                 <?php endif; ?>
             <?php endif; ?>
         </nav>

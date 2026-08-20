@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
 
 class ClientController
 {
@@ -44,9 +45,12 @@ class ClientController
         $db = Database::connection();
 
         $stmt = $db->prepare(
-            "SELECT a.id, a.slot_id, a.status, s.slot_date, s.start_time
+            "SELECT a.id, a.slot_id, a.status, s.slot_date, s.start_time,
+                    u.last_name AS psych_last_name, u.first_name AS psych_first_name
              FROM appointments a
              JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN psychologist_profiles p ON p.id = s.psychologist_id
+             JOIN users u ON u.id = p.user_id
              WHERE a.id = ? AND a.client_id = ?"
         );
         $stmt->execute([$appointmentId, Auth::id()]);
@@ -71,6 +75,24 @@ class ClientController
             $db->prepare("UPDATE schedule_slots SET status = 'free' WHERE id = ?")
                 ->execute([$appointment['slot_id']]);
             $db->commit();
+
+            // Оповещение об отмене (заглушка — см. src/Core/Notifications/).
+            $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+            $clientRow->execute([Auth::id()]);
+            $client = $clientRow->fetch();
+            if ($client) {
+                NotificationDispatcher::default()->notify(
+                    $client,
+                    'Запись отменена',
+                    sprintf(
+                        'Ваша запись к психологу %s %s на %s в %s отменена.',
+                        $appointment['psych_last_name'],
+                        $appointment['psych_first_name'],
+                        date('d.m.Y', strtotime($appointment['slot_date'])),
+                        substr($appointment['start_time'], 0, 5)
+                    )
+                );
+            }
         } catch (\Throwable $e) {
             $db->rollBack();
         }
