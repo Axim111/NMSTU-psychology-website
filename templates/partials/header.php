@@ -16,6 +16,8 @@ function navActive(string $prefix, string $currentPath): string
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= htmlspecialchars($pageTitle ?? 'Психологическая поддержка') ?></title>
     <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/app.css">
+    <script defer src="/assets/js/app.js"></script>
 </head>
 <body>
 <header class="site-header">
@@ -44,10 +46,12 @@ function navActive(string $prefix, string $currentPath): string
                 ?>
                 <a href="<?= $roleLink ?>" class="<?= navActive($roleLink, $currentPath) ?>"><?= $roleLabel ?></a>
                 <?php if (\App\Core\Auth::role() === 'psychologist'): ?>
+                    <a href="/dashboard/profile" class="<?= navActive('/dashboard/profile', $currentPath) ?>">Профиль</a>
                     <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Управление объявлениями</a>
                 <?php elseif (\App\Core\Auth::role() === 'admin'): ?>
                     <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Объявления</a>
                     <a href="/admin/contacts" class="<?= navActive('/admin/contacts', $currentPath) ?>">Ссылки (упр.)</a>
+                    <a href="/admin/appointments" class="<?= navActive('/admin/appointments', $currentPath) ?>">Записи</a>
                     <a href="/admin/notifications" class="<?= navActive('/admin/notifications', $currentPath) ?>">Уведомления</a>
                 <?php endif; ?>
             <?php endif; ?>

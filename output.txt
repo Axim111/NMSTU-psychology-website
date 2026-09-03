@@ -1,23 +1,71 @@
 === НАЙДЕННЫЕ ФАЙЛЫ ===
-Дата: 2026-08-17T02:47:27.241Z
-Количество файлов: 37
+Дата: 2026-09-03T17:26:07.298Z
+Количество файлов: 46
 
 ============================================================
-ФАЙЛ #1: composer.json
+ФАЙЛ #1: bin\send-reminders.php
 ============================================================
-{
-    "name": "university/psycho-booking",
-    "description": "Запись на приём к психологам вуза",
-    "type": "project",
-    "require": {
-        "php": ">=8.0"
-    },
-    "autoload": {
-        "psr-4": {
-            "App\\": "src/"
-        }
-    }
+<?php
+
+/**
+ * Напоминания о записях на завтра.
+ *
+ * ЗАГЛУШКА-КАРКАС: сама рассылка (см. src/Core/Notifications/) пока
+ * ничего реально не отправляет, только пишет в notification_log.
+ * Но сам механизм "раз в день пройтись по завтрашним записям и
+ * напомнить" — уже рабочий, его не переделывать, когда подключат
+ * реальные каналы.
+ *
+ * Не вызывается из веб-запросов. Предполагается запуск по cron,
+ * например раз в сутки:
+ *   0 9 * * * docker compose exec -T php php bin/send-reminders.php
+ *
+ * (Точный способ запуска внутри Docker — на усмотрение того, кто
+ * будет разворачивать прод: cron на хосте с docker compose exec,
+ * либо отдельный контейнер с cron внутри. Тут не решаем.)
+ */
+
+require __DIR__ . '/../src/Core/Database.php';
+require __DIR__ . '/../src/Core/Notifications/NotifierInterface.php';
+require __DIR__ . '/../src/Core/Notifications/EmailNotifier.php';
+require __DIR__ . '/../src/Core/Notifications/PortalNotifier.php';
+require __DIR__ . '/../src/Core/Notifications/NotificationDispatcher.php';
+
+use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
+
+$db = Database::connection();
+
+$stmt = $db->query(
+    "SELECT a.id, u.id AS client_id, u.email, u.last_name, u.first_name,
+            s.start_time, pu.last_name AS psych_last_name, pu.first_name AS psych_first_name
+     FROM appointments a
+     JOIN schedule_slots s ON s.id = a.slot_id
+     JOIN psychologist_profiles p ON p.id = s.psychologist_id
+     JOIN users pu ON pu.id = p.user_id
+     JOIN users u ON u.id = a.client_id
+     WHERE a.status = 'active' AND s.slot_date = CURDATE() + INTERVAL 1 DAY"
+);
+$appointments = $stmt->fetchAll();
+
+$dispatcher = NotificationDispatcher::default();
+$count = 0;
+
+foreach ($appointments as $a) {
+    $dispatcher->notify(
+        ['id' => $a['client_id'], 'email' => $a['email']],
+        'Напоминание о завтрашней записи',
+        sprintf(
+            'Завтра в %s у вас приём у психолога %s %s.',
+            substr($a['start_time'], 0, 5),
+            $a['psych_last_name'],
+            $a['psych_first_name']
+        )
+    );
+    $count++;
 }
+
+echo "Отправлено напоминаний (заглушка): {$count}\n";
 
 
 ============================================================
@@ -66,8 +114,19 @@ return [
 -- MySQL / MariaDB, InnoDB, utf8mb4
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS psycho_booking
-    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- Явно фиксируем кодировку соединения клиента. Без этой строки
+-- Docker-контейнер MySQL (docker-entrypoint-initdb.d) импортирует файл
+-- через клиент с дефолтной локалью контейнера (часто не UTF-8) —
+-- кириллица превращается в кракозябры, даже если у самой БД
+-- character-set-server=utf8mb4. При обычном ручном импорте эту же
+-- проблему лечили флагом --default-character-set=utf8mb4 у команды
+-- mysql, но Docker сам решает, как запускать импорт, поэтому кодировку
+-- надёжнее зашить в сам файл.
+
+-- SET NAMES utf8mb4;
+
+-- CREATE DATABASE IF NOT EXISTS psycho_booking
+--     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 USE psycho_booking;
 
@@ -187,6 +246,25 @@ CREATE TABLE contacts (
     type            ENUM('phone', 'link', 'text') NOT NULL DEFAULT 'text'
 ) ENGINE=InnoDB;
 
+-- ------------------------------------------------------------
+-- Лог уведомлений (заглушка). Реальная отправка (почта портала,
+-- колокольчик на портале) пока не подключена — см.
+-- src/Core/Notifications/. Каждая "отправка" просто пишется сюда,
+-- чтобы было видно, что сработало бы и когда, до подключения
+-- настоящих каналов.
+-- ------------------------------------------------------------
+CREATE TABLE notification_log (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT UNSIGNED NOT NULL,
+    channel         ENUM('email', 'portal') NOT NULL,
+    subject         VARCHAR(200) NOT NULL,
+    message         TEXT NOT NULL,
+    status          ENUM('stub', 'sent', 'failed') NOT NULL DEFAULT 'stub'
+                    COMMENT 'stub — заглушка, реально никуда не отправлено',
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 
 ============================================================
 ФАЙЛ #5: database\seed.sql
@@ -194,6 +272,10 @@ CREATE TABLE contacts (
 -- Тестовые данные — чтобы видеть реальный флоу записи, а не пустые страницы.
 -- Выполнить после schema.sql:
 --   mysql -u root psycho_booking < database/seed.sql
+
+-- Та же причина, что и в schema.sql — фиксируем кодировку клиента,
+-- иначе Docker-инициализация испортит кириллицу.
+SET NAMES utf8mb4;
 
 USE psycho_booking;
 
@@ -314,6 +396,7 @@ $router = new Router();
 // Публичная запись (гостевой сценарий, пока нет SSO)
 $router->get('/', [HomeController::class, 'index']);
 $router->get('/psychologist', [BookingController::class, 'show']);
+$router->get('/api/psychologist/slots', [BookingController::class, 'slotsApi']);
 $router->get('/book', [BookingController::class, 'bookForm']);
 $router->post('/book', [BookingController::class, 'store']);
 
@@ -328,12 +411,16 @@ $router->post('/cabinet/cancel', [ClientController::class, 'cancel']);
 
 // Кабинет психолога
 $router->get('/dashboard', [PsychologistController::class, 'dashboard']);
+$router->get('/dashboard/profile', [PsychologistController::class, 'profile']);
+$router->post('/dashboard/profile', [PsychologistController::class, 'updateProfile']);
 $router->get('/dashboard/schedule', [PsychologistController::class, 'schedule']);
 $router->post('/dashboard/schedule', [PsychologistController::class, 'addSlot']);
 $router->post('/dashboard/schedule/block', [PsychologistController::class, 'blockSlot']);
 $router->get('/dashboard/clients', [PsychologistController::class, 'clients']);
 $router->get('/dashboard/clients/show', [PsychologistController::class, 'clientDetail']);
 $router->post('/dashboard/notes', [PsychologistController::class, 'addNote']);
+$router->post('/dashboard/appointments/cancel', [PsychologistController::class, 'cancelAppointment']);
+$router->post('/dashboard/message', [PsychologistController::class, 'messageClient']);
 
 // Объявления/памятки — публичная страница + управление (психолог, админ)
 $router->get('/announcements', [AnnouncementController::class, 'index']);
@@ -351,6 +438,15 @@ $router->post('/admin/contacts/delete', [ContactController::class, 'delete']);
 $router->get('/admin', [AdminController::class, 'index']);
 $router->get('/admin/psychologists/new', [AdminController::class, 'newPsychologistForm']);
 $router->post('/admin/psychologists', [AdminController::class, 'createPsychologist']);
+$router->post('/admin/psychologists/delete', [AdminController::class, 'deletePsychologist']);
+$router->get('/admin/schedule', [AdminController::class, 'schedule']);
+$router->post('/admin/schedule', [AdminController::class, 'addSlot']);
+$router->post('/admin/schedule/block', [AdminController::class, 'blockSlot']);
+$router->get('/admin/appointments', [AdminController::class, 'appointments']);
+$router->post('/admin/appointments/cancel', [AdminController::class, 'cancelAppointment']);
+$router->get('/admin/appointments/move', [AdminController::class, 'moveAppointmentForm']);
+$router->post('/admin/appointments/move', [AdminController::class, 'moveAppointment']);
+$router->get('/admin/notifications', [AdminController::class, 'notifications']);
 
 $router->dispatch($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI']);
 
@@ -364,6 +460,8 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
+use PDO;
 
 class AdminController
 {
@@ -376,7 +474,8 @@ class AdminController
         Auth::requireRole('admin');
 
         $stmt = Database::connection()->query(
-            "SELECT p.id, u.last_name, u.first_name, u.patronymic, u.email,
+            "SELECT p.id, p.user_id, p.photo_path,
+                    u.last_name, u.first_name, u.patronymic, u.email,
                     (SELECT COUNT(*) FROM schedule_slots s WHERE s.psychologist_id = p.id AND s.status = 'booked') AS booked_count
              FROM psychologist_profiles p
              JOIN users u ON u.id = p.user_id
@@ -394,6 +493,11 @@ class AdminController
     {
         Auth::requireRole('admin');
         $error = null;
+        $directions = [];
+        try {
+            $directions = Database::connection()->query("SELECT id, name FROM directions ORDER BY id")->fetchAll();
+        } catch (\Throwable $e) {
+        }
         require __DIR__ . '/../../templates/admin/new_psychologist.php';
     }
 
@@ -411,9 +515,16 @@ class AdminController
         $email = trim($_POST['email'] ?? '');
         $password = $_POST['password'] ?? '';
         $bio = trim($_POST['bio'] ?? '');
+        $photoPath = trim($_POST['photo_path'] ?? '');
+        $selectedDirections = $_POST['directions'] ?? [];
 
         if ($lastName === '' || $firstName === '' || $email === '' || $password === '') {
             $error = 'Заполните фамилию, имя, email и пароль.';
+            $directions = [];
+            try {
+                $directions = Database::connection()->query("SELECT id, name FROM directions ORDER BY id")->fetchAll();
+            } catch (\Throwable $e) {
+            }
             require __DIR__ . '/../../templates/admin/new_psychologist.php';
             return;
         }
@@ -432,19 +543,442 @@ class AdminController
             $userId = (int)$db->lastInsertId();
 
             $stmt = $db->prepare(
-                "INSERT INTO psychologist_profiles (user_id, bio) VALUES (?, ?)"
+                "INSERT INTO psychologist_profiles (user_id, photo_path, bio) VALUES (?, ?, ?)"
             );
-            $stmt->execute([$userId, $bio ?: null]);
+            $stmt->execute([$userId, $photoPath ?: null, $bio ?: null]);
+            $profileId = (int)$db->lastInsertId();
+
+            // направления (если выбраны)
+            if (is_array($selectedDirections) && !empty($selectedDirections)) {
+                $ins = $db->prepare("INSERT INTO psychologist_directions (psychologist_id, direction_id) VALUES (?, ?)");
+                foreach ($selectedDirections as $dirId) {
+                    $dirId = (int)$dirId;
+                    if ($dirId > 0) {
+                        $ins->execute([$profileId, $dirId]);
+                    }
+                }
+            }
 
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
             $error = 'Не получилось создать психолога — возможно, такой email уже есть.';
+            $directions = [];
+            try {
+                $directions = Database::connection()->query("SELECT id, name FROM directions ORDER BY id")->fetchAll();
+            } catch (\Throwable $e2) {
+            }
             require __DIR__ . '/../../templates/admin/new_psychologist.php';
             return;
         }
 
         header('Location: /admin');
+    }
+
+    /**
+     * POST /admin/psychologists/delete
+     * Удаление психолога (users + профиль каскадом).
+     */
+    public function deletePsychologist(): void
+    {
+        Auth::requireRole('admin');
+
+        $userId = (int)($_POST['user_id'] ?? 0);
+        if ($userId <= 0) {
+            header('Location: /admin');
+            return;
+        }
+
+        $stmt = Database::connection()->prepare(
+            "DELETE FROM users WHERE id = ? AND role = 'psychologist'"
+        );
+        $stmt->execute([$userId]);
+
+        header('Location: /admin');
+    }
+
+    /**
+     * GET /admin/schedule?psychologist_id=...
+     * Управление расписанием любого психолога (как у него в кабинете).
+     */
+    public function schedule(): void
+    {
+        Auth::requireRole('admin');
+
+        $psychologistId = (int)($_GET['psychologist_id'] ?? 0);
+        if ($psychologistId <= 0) {
+            header('Location: /admin');
+            return;
+        }
+
+        $stmt = Database::connection()->prepare(
+            "SELECT p.id, u.first_name, u.last_name, u.patronymic
+             FROM psychologist_profiles p
+             JOIN users u ON u.id = p.user_id
+             WHERE p.id = ?"
+        );
+        $stmt->execute([$psychologistId]);
+        $psychologist = $stmt->fetch();
+        if (!$psychologist) {
+            header('Location: /admin');
+            return;
+        }
+
+        $stmt = Database::connection()->prepare(
+            "SELECT id, slot_date, start_time, end_time, status, format, is_emergency_override
+             FROM schedule_slots
+             WHERE psychologist_id = ? AND slot_date >= CURDATE()
+             ORDER BY slot_date, start_time"
+        );
+        $stmt->execute([$psychologistId]);
+        $slots = $stmt->fetchAll();
+
+        $maxHours = $this->maxHoursPerWeek($psychologistId);
+        $currentWeekHours = $this->weeklyHours($psychologistId, date('Y-m-d'));
+
+        require __DIR__ . '/../../templates/admin/psychologist_schedule.php';
+    }
+
+    /**
+     * POST /admin/schedule
+     * Добавить слот психологу.
+     */
+    public function addSlot(): void
+    {
+        Auth::requireRole('admin');
+
+        $psychologistId = (int)($_POST['psychologist_id'] ?? 0);
+        $date = $_POST['slot_date'] ?? '';
+        $start = $_POST['start_time'] ?? '';
+        $end = $_POST['end_time'] ?? '';
+        $format = $_POST['format'] ?? 'individual';
+        $emergencyOverride = isset($_POST['emergency_override']);
+
+        if ($psychologistId <= 0 || !$date || !$start || !$end) {
+            header('Location: /admin');
+            return;
+        }
+
+        if (!in_array($format, ['individual', 'group', 'family'], true)) {
+            $format = 'individual';
+        }
+
+        $durationHours = $this->hoursBetween($start, $end);
+        if ($durationHours <= 0) {
+            $_SESSION['schedule_error'] = 'Время окончания должно быть позже времени начала.';
+            header('Location: /admin/schedule?psychologist_id=' . $psychologistId);
+            return;
+        }
+
+        $existingHours = $this->weeklyHours($psychologistId, $date);
+        $maxHours = $this->maxHoursPerWeek($psychologistId);
+
+        if ($existingHours + $durationHours > $maxHours && !$emergencyOverride) {
+            $_SESSION['schedule_error'] = sprintf(
+                'Недельный лимит превышен: уже занято %.1fч из %.1fч. Отметьте «экстренный случай», чтобы добавить сверх лимита.',
+                $existingHours,
+                $maxHours
+            );
+            header('Location: /admin/schedule?psychologist_id=' . $psychologistId);
+            return;
+        }
+
+        $isOverride = ($existingHours + $durationHours > $maxHours) ? 1 : 0;
+
+        $stmt = Database::connection()->prepare(
+            "INSERT INTO schedule_slots (psychologist_id, slot_date, start_time, end_time, format, status, is_emergency_override)
+             VALUES (?, ?, ?, ?, ?, 'free', ?)"
+        );
+        $stmt->execute([$psychologistId, $date, $start, $end, $format, $isOverride]);
+
+        header('Location: /admin/schedule?psychologist_id=' . $psychologistId);
+    }
+
+    /**
+     * POST /admin/schedule/block
+     */
+    public function blockSlot(): void
+    {
+        Auth::requireRole('admin');
+
+        $psychologistId = (int)($_POST['psychologist_id'] ?? 0);
+        $slotId = (int)($_POST['slot_id'] ?? 0);
+        if ($psychologistId <= 0 || $slotId <= 0) {
+            header('Location: /admin');
+            return;
+        }
+
+        $stmt = Database::connection()->prepare(
+            "UPDATE schedule_slots SET status = 'blocked'
+             WHERE id = ? AND psychologist_id = ? AND status = 'free'"
+        );
+        $stmt->execute([$slotId, $psychologistId]);
+        header('Location: /admin/schedule?psychologist_id=' . $psychologistId);
+    }
+
+    /**
+     * GET /admin/appointments
+     * Список записей (для отмены/переноса).
+     */
+    public function appointments(): void
+    {
+        Auth::requireRole('admin');
+
+        $stmt = Database::connection()->query(
+            "SELECT a.id, a.status, a.request_comment,
+                    s.slot_date, s.start_time,
+                    pu.last_name AS psych_last_name, pu.first_name AS psych_first_name,
+                    cu.last_name AS client_last_name, cu.first_name AS client_first_name, cu.group_or_dept, cu.phone, cu.email
+             FROM appointments a
+             JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN psychologist_profiles pp ON pp.id = s.psychologist_id
+             JOIN users pu ON pu.id = pp.user_id
+             JOIN users cu ON cu.id = a.client_id
+             ORDER BY s.slot_date DESC, s.start_time DESC
+             LIMIT 200"
+        );
+        $appointments = $stmt->fetchAll();
+
+        require __DIR__ . '/../../templates/admin/appointments_list.php';
+    }
+
+    /**
+     * POST /admin/appointments/cancel
+     */
+    public function cancelAppointment(): void
+    {
+        Auth::requireRole('admin');
+
+        $appointmentId = (int)($_POST['appointment_id'] ?? 0);
+        if ($appointmentId <= 0) {
+            header('Location: /admin/appointments');
+            return;
+        }
+
+        $db = Database::connection();
+
+        $stmt = $db->prepare(
+            "SELECT a.id, a.slot_id, a.status, a.client_id, s.slot_date, s.start_time,
+                    pu.last_name AS psych_last_name, pu.first_name AS psych_first_name
+             FROM appointments a
+             JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN psychologist_profiles pp ON pp.id = s.psychologist_id
+             JOIN users pu ON pu.id = pp.user_id
+             WHERE a.id = ?"
+        );
+        $stmt->execute([$appointmentId]);
+        $appointment = $stmt->fetch();
+
+        if (!$appointment || $appointment['status'] !== 'active') {
+            header('Location: /admin/appointments');
+            return;
+        }
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE appointments SET status = 'cancelled', cancelled_at = NOW() WHERE id = ?")
+                ->execute([$appointmentId]);
+            $db->prepare("UPDATE schedule_slots SET status = 'free' WHERE id = ?")
+                ->execute([$appointment['slot_id']]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+        }
+
+        // уведомление клиенту (заглушка)
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([(int)$appointment['client_id']]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Запись отменена администратором',
+                sprintf(
+                    'Ваша запись к психологу %s %s на %s в %s отменена.',
+                    $appointment['psych_last_name'],
+                    $appointment['psych_first_name'],
+                    date('d.m.Y', strtotime($appointment['slot_date'])),
+                    substr($appointment['start_time'], 0, 5)
+                )
+            );
+        }
+
+        header('Location: /admin/appointments');
+    }
+
+    /**
+     * GET /admin/appointments/move?id=...
+     * POST /admin/appointments/move
+     */
+    public function moveAppointmentForm(): void
+    {
+        Auth::requireRole('admin');
+        $appointmentId = (int)($_GET['id'] ?? 0);
+        if ($appointmentId <= 0) {
+            header('Location: /admin/appointments');
+            return;
+        }
+
+        $db = Database::connection();
+        $stmt = $db->prepare(
+            "SELECT a.id, a.status, a.client_id, a.slot_id,
+                    s.psychologist_id, s.slot_date, s.start_time,
+                    pu.last_name AS psych_last_name, pu.first_name AS psych_first_name,
+                    cu.last_name AS client_last_name, cu.first_name AS client_first_name
+             FROM appointments a
+             JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN psychologist_profiles pp ON pp.id = s.psychologist_id
+             JOIN users pu ON pu.id = pp.user_id
+             JOIN users cu ON cu.id = a.client_id
+             WHERE a.id = ?"
+        );
+        $stmt->execute([$appointmentId]);
+        $appointment = $stmt->fetch();
+
+        if (!$appointment || $appointment['status'] !== 'active') {
+            header('Location: /admin/appointments');
+            return;
+        }
+
+        $slots = $db->prepare(
+            "SELECT id, slot_date, start_time, end_time, format
+             FROM schedule_slots
+             WHERE psychologist_id = ? AND status = 'free' AND slot_date >= CURDATE()
+             ORDER BY slot_date, start_time"
+        );
+        $slots->execute([(int)$appointment['psychologist_id']]);
+        $freeSlots = $slots->fetchAll();
+
+        require __DIR__ . '/../../templates/admin/appointment_move.php';
+    }
+
+    public function moveAppointment(): void
+    {
+        Auth::requireRole('admin');
+
+        $appointmentId = (int)($_POST['appointment_id'] ?? 0);
+        $newSlotId = (int)($_POST['new_slot_id'] ?? 0);
+        if ($appointmentId <= 0 || $newSlotId <= 0) {
+            header('Location: /admin/appointments');
+            return;
+        }
+
+        $db = Database::connection();
+        $stmt = $db->prepare(
+            "SELECT a.id, a.status, a.client_id, a.slot_id AS old_slot_id,
+                    s.psychologist_id,
+                    os.slot_date AS old_date, os.start_time AS old_time,
+                    ns.slot_date AS new_date, ns.start_time AS new_time,
+                    pu.last_name AS psych_last_name, pu.first_name AS psych_first_name
+             FROM appointments a
+             JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN schedule_slots os ON os.id = a.slot_id
+             JOIN schedule_slots ns ON ns.id = ?
+             JOIN psychologist_profiles pp ON pp.id = s.psychologist_id
+             JOIN users pu ON pu.id = pp.user_id
+             WHERE a.id = ?"
+        );
+        $stmt->execute([$newSlotId, $appointmentId]);
+        $row = $stmt->fetch();
+
+        if (!$row || $row['status'] !== 'active') {
+            header('Location: /admin/appointments');
+            return;
+        }
+
+        // слот должен принадлежать тому же психологу и быть свободным
+        $check = $db->prepare("SELECT psychologist_id, status FROM schedule_slots WHERE id = ?");
+        $check->execute([$newSlotId]);
+        $slotRow = $check->fetch();
+        if (!$slotRow || $slotRow['status'] !== 'free' || (int)$slotRow['psychologist_id'] !== (int)$row['psychologist_id']) {
+            header('Location: /admin/appointments/move?id=' . $appointmentId);
+            return;
+        }
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE schedule_slots SET status = 'free' WHERE id = ?")->execute([(int)$row['old_slot_id']]);
+            $db->prepare("UPDATE schedule_slots SET status = 'booked' WHERE id = ?")->execute([$newSlotId]);
+            $db->prepare("UPDATE appointments SET slot_id = ? WHERE id = ?")->execute([$newSlotId, $appointmentId]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            header('Location: /admin/appointments/move?id=' . $appointmentId);
+            return;
+        }
+
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([(int)$row['client_id']]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Запись перенесена',
+                sprintf(
+                    'Ваша запись к психологу %s %s перенесена с %s %s на %s %s.',
+                    $row['psych_last_name'],
+                    $row['psych_first_name'],
+                    date('d.m.Y', strtotime($row['old_date'])),
+                    substr($row['old_time'], 0, 5),
+                    date('d.m.Y', strtotime($row['new_date'])),
+                    substr($row['new_time'], 0, 5)
+                )
+            );
+        }
+
+        header('Location: /admin/appointments');
+    }
+
+    private function hoursBetween(string $start, string $end): float
+    {
+        $startTs = strtotime($start);
+        $endTs = strtotime($end);
+        return ($endTs - $startTs) / 3600;
+    }
+
+    private function weeklyHours(int $psychologistId, string $aroundDate): float
+    {
+        $stmt = Database::connection()->prepare(
+            "SELECT COALESCE(SUM(TIME_TO_SEC(TIMEDIFF(end_time, start_time))), 0) / 3600 AS hours
+             FROM schedule_slots
+             WHERE psychologist_id = ?
+               AND status IN ('free', 'booked')
+               AND YEARWEEK(slot_date, 3) = YEARWEEK(?, 3)"
+        );
+        $stmt->execute([$psychologistId, $aroundDate]);
+        return (float)$stmt->fetchColumn();
+    }
+
+    private function maxHoursPerWeek(int $psychologistId): float
+    {
+        $stmt = Database::connection()->prepare(
+            "SELECT max_hours_per_week FROM psychologist_profiles WHERE id = ?"
+        );
+        $stmt->execute([$psychologistId]);
+        $val = $stmt->fetchColumn();
+        return $val !== false ? (float)$val : 9.0;
+    }
+
+    /**
+     * GET /admin/notifications
+     * Заглушка-витрина: что бы отправилось по email/порталу, если бы
+     * каналы были подключены по-настоящему. Реальной отправки нет,
+     * это просто notification_log.
+     */
+    public function notifications(): void
+    {
+        Auth::requireRole('admin');
+
+        $items = Database::connection()->query(
+            "SELECT n.channel, n.subject, n.message, n.status, n.created_at,
+                    u.last_name, u.first_name
+             FROM notification_log n
+             JOIN users u ON u.id = n.user_id
+             ORDER BY n.created_at DESC
+             LIMIT 50"
+        )->fetchAll();
+
+        require __DIR__ . '/../../templates/admin/notifications.php';
     }
 }
 
@@ -612,6 +1146,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
 use PDO;
 
 class BookingController
@@ -628,10 +1163,17 @@ class BookingController
         $selectedDate = $_GET['date'] ?? null;
 
         $stmt = $db->prepare(
-            "SELECT p.id, u.first_name, u.last_name, u.patronymic
+            "SELECT
+                p.id,
+                u.first_name, u.last_name, u.patronymic,
+                p.photo_path, p.bio,
+                GROUP_CONCAT(d.name SEPARATOR ', ') AS directions
              FROM psychologist_profiles p
              JOIN users u ON u.id = p.user_id
-             WHERE p.id = ?"
+             LEFT JOIN psychologist_directions pd ON pd.psychologist_id = p.id
+             LEFT JOIN directions d ON d.id = pd.direction_id
+             WHERE p.id = ?
+             GROUP BY p.id, u.first_name, u.last_name, u.patronymic, p.photo_path, p.bio"
         );
         $stmt->execute([$psychologistId]);
         $psychologist = $stmt->fetch();
@@ -668,12 +1210,60 @@ class BookingController
     }
 
     /**
+     * GET /api/psychologist/slots?id=1
+     * JSON со свободными слотами (для модального выбора даты/времени).
+     * Возвращаем группировку по датам, чтобы фронт мог быстро рисовать список
+     * дат и тайм-слоты с цветовой маркировкой формата.
+     */
+    public function slotsApi(): void
+    {
+        $db = Database::connection();
+        $psychologistId = (int)($_GET['id'] ?? 0);
+
+        if ($psychologistId <= 0) {
+            http_response_code(422);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['error' => 'missing_id'], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        $stmt = $db->prepare(
+            "SELECT id, slot_date, start_time, format
+             FROM schedule_slots
+             WHERE psychologist_id = ? AND status = 'free' AND slot_date >= CURDATE()
+             ORDER BY slot_date, start_time"
+        );
+        $stmt->execute([$psychologistId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $byDate = [];
+        foreach ($rows as $r) {
+            $date = $r['slot_date'];
+            if (!isset($byDate[$date])) {
+                $byDate[$date] = [
+                    'date' => $date,
+                    'slots' => [],
+                ];
+            }
+            $byDate[$date]['slots'][] = [
+                'id' => (int)$r['id'],
+                'start_time' => $r['start_time'],
+                'format' => $r['format'],
+            ];
+        }
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['dates' => array_values($byDate)], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
      * GET /book?slot_id=5
      * Форма с данными клиента для выбранного слота.
      */
     public function bookForm(): void
     {
         $slotId = (int)($_GET['slot_id'] ?? 0);
+        $isPartial = (string)($_GET['partial'] ?? '') === '1';
         $slot = $this->fetchSlotWithPsychologist($slotId);
 
         if (!$slot || $slot['status'] !== 'free') {
@@ -687,7 +1277,7 @@ class BookingController
         $loggedInClient = null;
         if (Auth::check() && Auth::role() === 'client') {
             $stmt = Database::connection()->prepare(
-                'SELECT last_name, first_name, patronymic, group_or_dept, phone FROM users WHERE id = ?'
+                'SELECT last_name, first_name, patronymic, group_or_dept, phone, email FROM users WHERE id = ?'
             );
             $stmt->execute([Auth::id()]);
             $loggedInClient = $stmt->fetch();
@@ -707,12 +1297,19 @@ class BookingController
     {
         $slotId = (int)($_POST['slot_id'] ?? 0);
         $comment = trim($_POST['comment'] ?? '');
+        $consent = (string)($_POST['consent'] ?? '');
 
         $slot = $this->fetchSlotWithPsychologist($slotId);
 
         if (!$slot || $slot['status'] !== 'free') {
             http_response_code(409);
             echo 'Этот слот больше не доступен — возможно, его уже забронировали.';
+            return;
+        }
+
+        if ($consent !== '1') {
+            http_response_code(422);
+            echo 'Нужно согласие на обработку персональных данных.';
             return;
         }
 
@@ -724,6 +1321,7 @@ class BookingController
             $firstName = trim($_POST['first_name'] ?? '');
             $group = trim($_POST['group_or_dept'] ?? '');
             $phone = trim($_POST['phone'] ?? '');
+            $email = trim($_POST['email'] ?? '');
 
             if ($lastName === '' || $firstName === '' || $phone === '') {
                 http_response_code(422);
@@ -738,12 +1336,24 @@ class BookingController
             if ($isLoggedInClient) {
                 $clientId = Auth::id();
             } else {
-                $stmt = $db->prepare(
-                    "INSERT INTO users (role, last_name, first_name, group_or_dept, phone)
-                     VALUES ('client', ?, ?, ?, ?)"
-                );
-                $stmt->execute([$lastName, $firstName, $group, $phone]);
-                $clientId = (int)$db->lastInsertId();
+                $emailToSave = ($email ?? '') !== '' ? $email : null;
+
+                try {
+                    $stmt = $db->prepare(
+                        "INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email)
+                         VALUES ('client', ?, ?, ?, ?, ?)"
+                    );
+                    $stmt->execute([$lastName, $firstName, $group, $phone, $emailToSave]);
+                    $clientId = (int)$db->lastInsertId();
+                } catch (\Throwable $e) {
+                    // Если email уже занят — создаём запись без email (не мешаем записи на приём).
+                    $stmt = $db->prepare(
+                        "INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email)
+                         VALUES ('client', ?, ?, ?, ?, NULL)"
+                    );
+                    $stmt->execute([$lastName, $firstName, $group, $phone]);
+                    $clientId = (int)$db->lastInsertId();
+                }
             }
 
             $stmt = $db->prepare(
@@ -763,13 +1373,31 @@ class BookingController
             return;
         }
 
+        // Оповещение клиента о записи (заглушка — см. src/Core/Notifications/).
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([$clientId]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            $psychFullName = trim($slot['last_name'] . ' ' . $slot['first_name'] . ' ' . ($slot['patronymic'] ?? ''));
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Запись на приём подтверждена',
+                sprintf(
+                    'Вы записаны к психологу %s на %s в %s.',
+                    $psychFullName,
+                    date('d.m.Y', strtotime($slot['slot_date'])),
+                    substr($slot['start_time'], 0, 5)
+                )
+            );
+        }
+
         require __DIR__ . '/../../templates/booking_confirmation.php';
     }
 
     private function fetchSlotWithPsychologist(int $slotId): array|false
     {
         $stmt = Database::connection()->prepare(
-            "SELECT s.id, s.slot_date, s.start_time, s.status, s.psychologist_id,
+            "SELECT s.id, s.slot_date, s.start_time, s.end_time, s.format, s.status, s.psychologist_id,
                     u.first_name, u.last_name, u.patronymic
              FROM schedule_slots s
              JOIN psychologist_profiles p ON p.id = s.psychologist_id
@@ -791,6 +1419,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
 
 class ClientController
 {
@@ -831,9 +1460,12 @@ class ClientController
         $db = Database::connection();
 
         $stmt = $db->prepare(
-            "SELECT a.id, a.slot_id, a.status, s.slot_date, s.start_time
+            "SELECT a.id, a.slot_id, a.status, s.slot_date, s.start_time,
+                    u.last_name AS psych_last_name, u.first_name AS psych_first_name
              FROM appointments a
              JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN psychologist_profiles p ON p.id = s.psychologist_id
+             JOIN users u ON u.id = p.user_id
              WHERE a.id = ? AND a.client_id = ?"
         );
         $stmt->execute([$appointmentId, Auth::id()]);
@@ -858,6 +1490,24 @@ class ClientController
             $db->prepare("UPDATE schedule_slots SET status = 'free' WHERE id = ?")
                 ->execute([$appointment['slot_id']]);
             $db->commit();
+
+            // Оповещение об отмене (заглушка — см. src/Core/Notifications/).
+            $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+            $clientRow->execute([Auth::id()]);
+            $client = $clientRow->fetch();
+            if ($client) {
+                NotificationDispatcher::default()->notify(
+                    $client,
+                    'Запись отменена',
+                    sprintf(
+                        'Ваша запись к психологу %s %s на %s в %s отменена.',
+                        $appointment['psych_last_name'],
+                        $appointment['psych_first_name'],
+                        date('d.m.Y', strtotime($appointment['slot_date'])),
+                        substr($appointment['start_time'], 0, 5)
+                    )
+                );
+            }
         } catch (\Throwable $e) {
             $db->rollBack();
         }
@@ -966,12 +1616,15 @@ class HomeController
     public function index(): void
     {
         $psychologists = [];
+        $directions = [];
         try {
             $stmt = Database::connection()->query(
                 "SELECT
                     p.id,
                     u.first_name, u.last_name, u.patronymic,
-                    GROUP_CONCAT(d.name SEPARATOR ', ') AS directions
+                    p.photo_path, p.bio,
+                    GROUP_CONCAT(d.name SEPARATOR ', ') AS directions,
+                    GROUP_CONCAT(d.id SEPARATOR ',') AS direction_ids
                  FROM psychologist_profiles p
                  JOIN users u ON u.id = p.user_id
                  LEFT JOIN psychologist_directions pd ON pd.psychologist_id = p.id
@@ -980,6 +1633,9 @@ class HomeController
                  ORDER BY u.last_name"
             );
             $psychologists = $stmt->fetchAll();
+
+            $dirStmt = Database::connection()->query("SELECT id, name FROM directions ORDER BY id");
+            $directions = $dirStmt->fetchAll();
         } catch (\Throwable $e) {
             // На старте БД может быть ещё не создана — не роняем страницу.
         }
@@ -998,9 +1654,72 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
+use PDO;
 
 class PsychologistController
 {
+    /**
+     * GET /dashboard/profile
+     * Профиль психолога: фото/описание/направления.
+     */
+    public function profile(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $db = Database::connection();
+        $profileStmt = $db->prepare(
+            "SELECT p.id, p.photo_path, p.bio, u.first_name, u.last_name, u.patronymic
+             FROM psychologist_profiles p
+             JOIN users u ON u.id = p.user_id
+             WHERE p.id = ?"
+        );
+        $profileStmt->execute([$psychologistId]);
+        $profile = $profileStmt->fetch();
+
+        $directions = $db->query("SELECT id, name FROM directions ORDER BY id")->fetchAll();
+        $selStmt = $db->prepare("SELECT direction_id FROM psychologist_directions WHERE psychologist_id = ?");
+        $selStmt->execute([$psychologistId]);
+        $selected = array_map('intval', $selStmt->fetchAll(PDO::FETCH_COLUMN));
+
+        require __DIR__ . '/../../templates/dashboard/profile.php';
+    }
+
+    /**
+     * POST /dashboard/profile
+     */
+    public function updateProfile(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $photoPath = trim($_POST['photo_path'] ?? '');
+        $bio = trim($_POST['bio'] ?? '');
+        $selectedDirections = $_POST['directions'] ?? [];
+
+        $db = Database::connection();
+        $db->beginTransaction();
+        try {
+            $stmt = $db->prepare("UPDATE psychologist_profiles SET photo_path = ?, bio = ? WHERE id = ?");
+            $stmt->execute([$photoPath ?: null, $bio ?: null, $psychologistId]);
+
+            $db->prepare("DELETE FROM psychologist_directions WHERE psychologist_id = ?")->execute([$psychologistId]);
+            if (is_array($selectedDirections) && !empty($selectedDirections)) {
+                $ins = $db->prepare("INSERT INTO psychologist_directions (psychologist_id, direction_id) VALUES (?, ?)");
+                foreach ($selectedDirections as $dirId) {
+                    $dirId = (int)$dirId;
+                    if ($dirId > 0) $ins->execute([$psychologistId, $dirId]);
+                }
+            }
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+        }
+
+        header('Location: /dashboard/profile');
+    }
     /**
      * GET /dashboard
      * Список ближайших записей психолога.
@@ -1013,7 +1732,8 @@ class PsychologistController
         $stmt = Database::connection()->prepare(
             "SELECT a.id, a.status, a.request_comment,
                     s.slot_date, s.start_time,
-                    u.last_name, u.first_name, u.patronymic, u.group_or_dept, u.phone
+                    u.id AS client_id,
+                    u.last_name, u.first_name, u.patronymic, u.group_or_dept, u.phone, u.email
              FROM appointments a
              JOIN schedule_slots s ON s.id = a.slot_id
              JOIN users u ON u.id = a.client_id
@@ -1208,6 +1928,131 @@ class PsychologistController
                 );
                 $stmt->execute([$appointmentId, $noteText]);
             }
+        }
+
+        header('Location: /dashboard/clients/show?id=' . $clientId);
+    }
+
+    /**
+     * POST /dashboard/appointments/cancel
+     * Отмена записи психологом (без ограничения 24ч).
+     */
+    public function cancelAppointment(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $appointmentId = (int)($_POST['appointment_id'] ?? 0);
+        if ($appointmentId <= 0) {
+            header('Location: /dashboard');
+            return;
+        }
+
+        $db = Database::connection();
+        $stmt = $db->prepare(
+            "SELECT a.id, a.slot_id, a.status, a.client_id,
+                    s.slot_date, s.start_time,
+                    cu.email, cu.last_name AS client_last_name, cu.first_name AS client_first_name
+             FROM appointments a
+             JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN users cu ON cu.id = a.client_id
+             WHERE a.id = ? AND s.psychologist_id = ?"
+        );
+        $stmt->execute([$appointmentId, $psychologistId]);
+        $appointment = $stmt->fetch();
+
+        if (!$appointment || $appointment['status'] !== 'active') {
+            header('Location: /dashboard');
+            return;
+        }
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE appointments SET status = 'cancelled', cancelled_at = NOW() WHERE id = ?")
+                ->execute([$appointmentId]);
+            $db->prepare("UPDATE schedule_slots SET status = 'free' WHERE id = ?")
+                ->execute([$appointment['slot_id']]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+        }
+
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([(int)$appointment['client_id']]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Запись отменена психологом',
+                sprintf(
+                    'Ваша запись на %s в %s отменена.',
+                    date('d.m.Y', strtotime($appointment['slot_date'])),
+                    substr($appointment['start_time'], 0, 5)
+                )
+            );
+        }
+
+        header('Location: /dashboard');
+    }
+
+    /**
+     * POST /dashboard/message
+     * Сообщение клиенту (уходит в уведомления как "почта/портал" заглушка).
+     */
+    public function messageClient(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $appointmentId = (int)($_POST['appointment_id'] ?? 0);
+        $clientId = (int)($_POST['client_id'] ?? 0);
+        $message = trim($_POST['message'] ?? '');
+
+        if ($clientId <= 0 || $message === '') {
+            header('Location: /dashboard/clients/show?id=' . $clientId);
+            return;
+        }
+
+        $db = Database::connection();
+
+        // Проверяем, что клиент вообще относится к этому психологу.
+        // Если передали appointment_id — проверяем конкретную запись; если нет — достаточно факта обращения.
+        if ($appointmentId > 0) {
+            $stmt = $db->prepare(
+                "SELECT a.id
+                 FROM appointments a
+                 JOIN schedule_slots s ON s.id = a.slot_id
+                 WHERE a.id = ? AND a.client_id = ? AND s.psychologist_id = ?"
+            );
+            $stmt->execute([$appointmentId, $clientId, $psychologistId]);
+            if (!$stmt->fetch()) {
+                header('Location: /dashboard/clients/show?id=' . $clientId);
+                return;
+            }
+        } else {
+            $stmt = $db->prepare(
+                "SELECT a.id
+                 FROM appointments a
+                 JOIN schedule_slots s ON s.id = a.slot_id
+                 WHERE a.client_id = ? AND s.psychologist_id = ?
+                 LIMIT 1"
+            );
+            $stmt->execute([$clientId, $psychologistId]);
+            if (!$stmt->fetch()) {
+                header('Location: /dashboard/clients/show?id=' . $clientId);
+                return;
+            }
+        }
+
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([$clientId]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Сообщение от психолога',
+                $message
+            );
         }
 
         header('Location: /dashboard/clients/show?id=' . $clientId);
@@ -1516,22 +2361,167 @@ class Database
                 self::$instance = new PDO($dsn, $user, $password, [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false,                
+                    PDO::ATTR_EMULATE_PREPARES => false,    
+                    // для кодировки
+                    PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",           
                 ]);
-                
-                self::$instance->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
-                self::$instance->exec("SET CHARACTER SET utf8mb4");
+
             } catch (PDOException $e) {
                 die('Ошибка подключения к БД: ' . $e->getMessage());
             }
         }
-
+        self::$instance->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+self::$instance->exec("SET CHARACTER SET utf8mb4");
         return self::$instance;
     }
 }
 
 ============================================================
-ФАЙЛ #19: src\Core\Router.php
+ФАЙЛ #19: src\Core\Notifications\EmailNotifier.php
+============================================================
+<?php
+
+namespace App\Core\Notifications;
+
+use App\Core\Database;
+
+/**
+ * ЗАГЛУШКА. Реальная отправка почты не подключена — портал отправляет
+ * уведомления сам (видно на скриншоте личного кабинета), у нас пока
+ * нет доступа ни к его почтовому шлюзу, ни к SMTP.
+ *
+ * Когда доступ появится, здесь вместо записи в notification_log
+ * появится реальная отправка — например через PHPMailer/Symfony
+ * Mailer, если это будет обычный SMTP, или через HTTP-запрос к API
+ * портала, если рассылкой писем управляет он сам. Сигнатура метода
+ * send() не изменится, так что вызывающий код (NotificationDispatcher)
+ * трогать не придётся.
+ */
+class EmailNotifier implements NotifierInterface
+{
+    public function send(array $recipient, string $subject, string $message): void
+    {
+        $stmt = Database::connection()->prepare(
+            "INSERT INTO notification_log (user_id, channel, subject, message, status)
+             VALUES (?, 'email', ?, ?, 'stub')"
+        );
+        $stmt->execute([$recipient['id'], $subject, $message]);
+    }
+}
+
+
+============================================================
+ФАЙЛ #20: src\Core\Notifications\NotificationDispatcher.php
+============================================================
+<?php
+
+namespace App\Core\Notifications;
+
+/**
+ * Рассылает одно уведомление сразу по всем подключённым каналам
+ * (сейчас — email + портал). Ошибка в одном канале не должна ронять
+ * основной сценарий (запись на приём всё равно должна создаться,
+ * даже если "отправка" уведомления почему-то упала) — поэтому каждый
+ * канал обёрнут в try/catch.
+ *
+ * Использование из контроллера:
+ *   NotificationDispatcher::default()->notify(
+ *       $clientRow, 'Запись подтверждена', 'Вы записаны на ...'
+ *   );
+ */
+class NotificationDispatcher
+{
+    /** @var NotifierInterface[] */
+    private array $channels;
+
+    public function __construct(array $channels)
+    {
+        $this->channels = $channels;
+    }
+
+    public static function default(): self
+    {
+        return new self([
+            new EmailNotifier(),
+            new PortalNotifier(),
+        ]);
+    }
+
+    public function notify(array $recipient, string $subject, string $message): void
+    {
+        foreach ($this->channels as $channel) {
+            try {
+                $channel->send($recipient, $subject, $message);
+            } catch (\Throwable $e) {
+                // Заглушка не должна ронять запись на приём — молча пропускаем.
+                // Когда каналы станут настоящими, здесь стоит добавить логирование ошибки.
+            }
+        }
+    }
+}
+
+
+============================================================
+ФАЙЛ #21: src\Core\Notifications\NotifierInterface.php
+============================================================
+<?php
+
+namespace App\Core\Notifications;
+
+/**
+ * Один канал доставки уведомления. Сейчас есть два стаба:
+ * EmailNotifier (почта портала) и PortalNotifier (колокольчик на
+ * портале — как на скриншоте "Уведомления" в личном кабинете).
+ *
+ * Когда портал даст доступ к своему почтовому шлюзу и к API
+ * уведомлений — здесь появятся EmailNotifier и PortalNotifier с
+ * реальной отправкой вместо записи в notification_log. Остальной
+ * код (NotificationDispatcher, вызовы из контроллеров) трогать не
+ * придётся — тот же принцип, что и с AuthProviderInterface.
+ */
+interface NotifierInterface
+{
+    /**
+     * @param array<string,mixed> $recipient Строка users: id, email, last_name, first_name...
+     */
+    public function send(array $recipient, string $subject, string $message): void;
+}
+
+
+============================================================
+ФАЙЛ #22: src\Core\Notifications\PortalNotifier.php
+============================================================
+<?php
+
+namespace App\Core\Notifications;
+
+use App\Core\Database;
+
+/**
+ * ЗАГЛУШКА. Портальные уведомления (колокольчик в шапке личного
+ * кабинета, см. скриншот) генерирует сам портал — у нас пока нет
+ * доступа к его API уведомлений.
+ *
+ * Когда доступ появится (скорее всего — вызов веб-сервиса портала,
+ * который создаёт запись в его таблице уведомлений для конкретного
+ * пользователя), здесь вместо записи в notification_log появится
+ * HTTP-запрос к этому веб-сервису. Сигнатура send() не изменится.
+ */
+class PortalNotifier implements NotifierInterface
+{
+    public function send(array $recipient, string $subject, string $message): void
+    {
+        $stmt = Database::connection()->prepare(
+            "INSERT INTO notification_log (user_id, channel, subject, message, status)
+             VALUES (?, 'portal', ?, ?, 'stub')"
+        );
+        $stmt->execute([$recipient['id'], $subject, $message]);
+    }
+}
+
+
+============================================================
+ФАЙЛ #23: src\Core\Router.php
 ============================================================
 <?php
 
@@ -1577,7 +2567,114 @@ class Router
 
 
 ============================================================
-ФАЙЛ #20: templates\admin\contacts_manage.php
+ФАЙЛ #24: templates\admin\appointments_list.php
+============================================================
+<?php $pageTitle = 'Записи'; require __DIR__ . '/../partials/header.php'; ?>
+
+<a href="/admin" class="back-link">← Админка</a>
+<h1>Все записи</h1>
+<p class="subtitle">Отмена и перенос записи доступны администратору без ограничения 24 часа.</p>
+
+<?php if (empty($appointments)): ?>
+    <p class="empty-state">Записей пока нет.</p>
+<?php else: ?>
+    <?php foreach ($appointments as $a): ?>
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                <div style="min-width:0;">
+                    <p style="margin:0 0 4px;font-weight:600;">
+                        <?= htmlspecialchars($a['client_last_name'] . ' ' . $a['client_first_name']) ?>
+                        <span style="color:var(--text-secondary);font-weight:normal;">
+                            <?php if (!empty($a['group_or_dept'])): ?> · <?= htmlspecialchars($a['group_or_dept']) ?><?php endif; ?>
+                            <?php if (!empty($a['phone'])): ?> · <?= htmlspecialchars($a['phone']) ?><?php endif; ?>
+                            <?php if (!empty($a['email'])): ?> · <?= htmlspecialchars($a['email']) ?><?php endif; ?>
+                        </span>
+                    </p>
+                    <p style="margin:0;color:var(--text-secondary);font-size:13px;">
+                        Психолог: <?= htmlspecialchars($a['psych_last_name'] . ' ' . $a['psych_first_name']) ?>
+                        · <?= htmlspecialchars(date('d.m.Y', strtotime($a['slot_date']))) ?>
+                        · <?= htmlspecialchars(substr($a['start_time'], 0, 5)) ?>
+                    </p>
+                    <?php if (!empty($a['request_comment'])): ?>
+                        <p style="margin:8px 0 0;color:var(--text-secondary);font-size:13px;">
+                            Запрос: «<?= htmlspecialchars($a['request_comment']) ?>»
+                        </p>
+                    <?php endif; ?>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;flex-shrink:0;">
+                    <span style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;
+                        <?= match($a['status']) {
+                            'active' => 'background:var(--blue-light);color:var(--blue-dark);',
+                            'cancelled' => 'background:#fdecea;color:#c0392b;',
+                            default => 'background:#eee;color:#555;',
+                        } ?>">
+                        <?= match($a['status']) { 'active' => 'Активна', 'cancelled' => 'Отменена', default => 'Завершена' } ?>
+                    </span>
+
+                    <?php if ($a['status'] === 'active'): ?>
+                        <div style="display:flex;gap:8px;">
+                            <a class="tw-btn tw-btn--ghost" href="/admin/appointments/move?id=<?= (int)$a['id'] ?>" style="height:34px;padding:0 12px;">Перенести</a>
+                            <form method="post" action="/admin/appointments/cancel" onsubmit="return confirm('Отменить запись?');" style="margin:0;">
+                                <input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
+                                <button type="submit" class="tw-btn tw-btn--ghost" style="height:34px;padding:0 12px;border-color:#fdecea;color:#c0392b;">Отменить</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
+
+<?php require __DIR__ . '/../partials/footer.php'; ?>
+
+
+
+============================================================
+ФАЙЛ #25: templates\admin\appointment_move.php
+============================================================
+<?php $pageTitle = 'Перенос записи'; require __DIR__ . '/../partials/header.php'; ?>
+
+<a href="/admin/appointments" class="back-link">← Все записи</a>
+<h1>Перенос записи</h1>
+<p class="subtitle">
+    Клиент: <?= htmlspecialchars($appointment['client_last_name'] . ' ' . $appointment['client_first_name']) ?><br>
+    Психолог: <?= htmlspecialchars($appointment['psych_last_name'] . ' ' . $appointment['psych_first_name']) ?><br>
+    Сейчас: <?= htmlspecialchars(date('d.m.Y', strtotime($appointment['slot_date']))) ?> · <?= htmlspecialchars(substr($appointment['start_time'], 0, 5)) ?>
+</p>
+
+<div class="card" style="max-width:560px;">
+    <?php if (empty($freeSlots)): ?>
+        <p class="empty-state" style="margin:0;">Нет свободных слотов для переноса.</p>
+    <?php else: ?>
+        <form method="post" action="/admin/appointments/move">
+            <input type="hidden" name="appointment_id" value="<?= (int)$appointment['id'] ?>">
+
+            <label for="new_slot_id">Новый слот</label>
+            <select id="new_slot_id" name="new_slot_id" required>
+                <?php foreach ($freeSlots as $s): ?>
+                    <option value="<?= (int)$s['id'] ?>">
+                        <?= htmlspecialchars(date('d.m.Y', strtotime($s['slot_date']))) ?>
+                        <?= htmlspecialchars(substr($s['start_time'], 0, 5)) ?>–<?= htmlspecialchars(substr($s['end_time'], 0, 5)) ?>
+                        (<?= match($s['format']) { 'group' => 'группа', 'family' => 'семья', default => 'лично' } ?>)
+                    </option>
+                <?php endforeach; ?>
+            </select>
+
+            <button type="submit" class="btn" style="margin-top:12px;" onclick="return confirm('Перенести запись на выбранный слот?');">
+                Перенести
+            </button>
+        </form>
+    <?php endif; ?>
+</div>
+
+<?php require __DIR__ . '/../partials/footer.php'; ?>
+
+
+
+============================================================
+ФАЙЛ #26: templates\admin\contacts_manage.php
 ============================================================
 <?php $pageTitle = 'Ссылки — управление'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -1623,25 +2720,56 @@ class Router
 
 
 ============================================================
-ФАЙЛ #21: templates\admin\index.php
+ФАЙЛ #27: templates\admin\index.php
 ============================================================
 <?php $pageTitle = 'Админка'; require __DIR__ . '/../partials/header.php'; ?>
 
 <h1>Психологи</h1>
-<p class="subtitle"><a href="/admin/psychologists/new">+ Добавить психолога</a></p>
+<p class="subtitle">
+    <a href="/admin/psychologists/new">+ Добавить психолога</a>
+    · <a href="/admin/appointments">Все записи</a>
+</p>
 
 <?php if (empty($psychologists)): ?>
     <p class="empty-state">Психологов пока нет.</p>
 <?php else: ?>
     <?php foreach ($psychologists as $p): ?>
-        <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
-            <div>
-                <p class="psychologist-name" style="margin-bottom:2px;">
-                    <?= htmlspecialchars($p['last_name'] . ' ' . $p['first_name'] . ' ' . ($p['patronymic'] ?? '')) ?>
-                </p>
-                <p style="font-size:13px;color:var(--text-secondary);margin:0;"><?= htmlspecialchars($p['email']) ?></p>
+        <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+            <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+                <div class="tw-profile__photo" style="width:54px;height:54px;border-radius:12px;">
+                    <?php if (!empty($p['photo_path'])): ?>
+                        <img src="<?= htmlspecialchars($p['photo_path']) ?>" alt="">
+                    <?php else: ?>
+                        <?php
+                            $fn = (string)($p['first_name'] ?? '');
+                            $ln = (string)($p['last_name'] ?? '');
+                            if (function_exists('mb_substr')) {
+                                $initials = mb_substr($fn, 0, 1) . mb_substr($ln, 0, 1);
+                            } else {
+                                $initials = substr($fn, 0, 1) . substr($ln, 0, 1);
+                            }
+                        ?>
+                        <?= htmlspecialchars($initials) ?>
+                    <?php endif; ?>
+                </div>
+                <div style="min-width:0;">
+                    <p class="psychologist-name" style="margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        <?= htmlspecialchars($p['last_name'] . ' ' . $p['first_name'] . ' ' . ($p['patronymic'] ?? '')) ?>
+                    </p>
+                    <p style="font-size:13px;color:var(--text-secondary);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        <?= htmlspecialchars($p['email']) ?>
+                    </p>
+                </div>
             </div>
-            <span style="font-size:13px;color:var(--text-secondary);"><?= (int)$p['booked_count'] ?> записей</span>
+
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                <a class="tw-btn tw-btn--ghost" href="/admin/schedule?psychologist_id=<?= (int)$p['id'] ?>" style="height:34px;padding:0 12px;">Расписание</a>
+                <span style="font-size:13px;color:var(--text-secondary);"><?= (int)$p['booked_count'] ?> записей</span>
+                <form method="post" action="/admin/psychologists/delete" onsubmit="return confirm('Удалить психолога?');" style="margin:0;">
+                    <input type="hidden" name="user_id" value="<?= (int)$p['user_id'] ?>">
+                    <button type="submit" class="tw-btn tw-btn--ghost" style="height:34px;padding:0 12px;border-color:#fdecea;color:#c0392b;">Удалить</button>
+                </form>
+            </div>
         </div>
     <?php endforeach; ?>
 <?php endif; ?>
@@ -1650,7 +2778,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #22: templates\admin\new_psychologist.php
+ФАЙЛ #28: templates\admin\new_psychologist.php
 ============================================================
 <?php $pageTitle = 'Новый психолог'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -1681,6 +2809,21 @@ class Router
         <label for="bio">О себе</label>
         <textarea id="bio" name="bio"></textarea>
 
+        <label for="photo_path">Фото (URL или путь)</label>
+        <input type="text" id="photo_path" name="photo_path" placeholder="/assets/img/psychologist.jpg">
+
+        <?php if (!empty($directions)): ?>
+            <p class="section-label" style="margin-top:16px;">Направления</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                <?php foreach ($directions as $d): ?>
+                    <label class="tw-chip" style="cursor:pointer;">
+                        <input type="checkbox" name="directions[]" value="<?= (int)$d['id'] ?>" style="width:auto;margin-right:8px;">
+                        <?= htmlspecialchars($d['name']) ?>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
         <button type="submit" class="btn">Создать</button>
     </form>
 </div>
@@ -1689,7 +2832,129 @@ class Router
 
 
 ============================================================
-ФАЙЛ #23: templates\announcements.php
+ФАЙЛ #29: templates\admin\notifications.php
+============================================================
+<?php $pageTitle = 'Уведомления (заглушка)'; require __DIR__ . '/../partials/header.php'; ?>
+
+<a href="/admin" class="back-link">← Назад</a>
+<h1>Уведомления — заглушка</h1>
+<p class="subtitle">
+    Реальная отправка (почта портала, колокольчик в личном кабинете) пока не
+    подключена. Здесь видно, что и кому было бы отправлено.
+</p>
+
+<?php if (empty($items)): ?>
+    <p class="empty-state">Пока ничего не "отправлялось" — запишись на приём или отмени запись, чтобы проверить.</p>
+<?php else: ?>
+    <?php foreach ($items as $it): ?>
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+                <div>
+                    <p style="font-size:12px;color:var(--muted);margin:0 0 4px;">
+                        <?= $it['channel'] === 'email' ? 'Почта' : 'Портал' ?>
+                        · <?= htmlspecialchars($it['last_name'] . ' ' . $it['first_name']) ?>
+                        · <?= htmlspecialchars(date('d.m.Y H:i', strtotime($it['created_at']))) ?>
+                    </p>
+                    <p class="psychologist-name" style="margin-bottom:4px;"><?= htmlspecialchars($it['subject']) ?></p>
+                    <p style="font-size:13px;margin:0;"><?= htmlspecialchars($it['message']) ?></p>
+                </div>
+                <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:var(--panel);color:var(--muted);white-space:nowrap;">
+                    заглушка
+                </span>
+            </div>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
+
+<?php require __DIR__ . '/../partials/footer.php'; ?>
+
+
+============================================================
+ФАЙЛ #30: templates\admin\psychologist_schedule.php
+============================================================
+<?php $pageTitle = 'Расписание психолога'; require __DIR__ . '/../partials/header.php'; ?>
+
+<a href="/admin" class="back-link">← Психологи</a>
+<h1>Расписание</h1>
+<p class="subtitle">
+    <?= htmlspecialchars($psychologist['last_name'] . ' ' . $psychologist['first_name'] . ' ' . ($psychologist['patronymic'] ?? '')) ?>
+    · Недельный лимит: <strong><?= number_format($currentWeekHours, 1) ?> из <?= number_format($maxHours, 1) ?> ч</strong>
+</p>
+
+<?php if (!empty($_SESSION['schedule_error'])): ?>
+    <p style="color:#c0392b;font-size:14px;"><?= htmlspecialchars($_SESSION['schedule_error']) ?></p>
+    <?php unset($_SESSION['schedule_error']); ?>
+<?php endif; ?>
+
+<div class="card">
+    <p class="section-label">Добавить слот</p>
+    <form method="post" action="/admin/schedule">
+        <input type="hidden" name="psychologist_id" value="<?= (int)$psychologist['id'] ?>">
+
+        <label for="slot_date">Дата</label>
+        <input type="date" id="slot_date" name="slot_date" required>
+
+        <label for="start_time">Начало</label>
+        <input type="time" id="start_time" name="start_time" required>
+
+        <label for="end_time">Конец</label>
+        <input type="time" id="end_time" name="end_time" required>
+
+        <label for="format">Формат</label>
+        <select id="format" name="format">
+            <option value="individual">Индивидуальный</option>
+            <option value="group">Групповой</option>
+            <option value="family">Семейный</option>
+        </select>
+
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
+            <input type="checkbox" name="emergency_override" value="1" style="width:auto;">
+            Экстренный случай — добавить сверх недельного лимита
+        </label>
+
+        <button type="submit" class="btn">Добавить</button>
+    </form>
+</div>
+
+<p class="section-label" style="margin-top:24px;">Ближайшие слоты</p>
+<?php if (empty($slots)): ?>
+    <p class="empty-state">Слотов пока нет.</p>
+<?php else: ?>
+    <?php foreach ($slots as $s): ?>
+        <div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;gap:10px;">
+            <span style="font-size:14px;">
+                <?= htmlspecialchars(date('d.m.Y', strtotime($s['slot_date']))) ?>,
+                <?= htmlspecialchars(substr($s['start_time'], 0, 5)) ?>–<?= htmlspecialchars(substr($s['end_time'], 0, 5)) ?>
+                <span style="color:var(--text-secondary);font-size:12px;">
+                    · <?= match($s['format']) { 'group' => 'групповой', 'family' => 'семейный', default => 'индивидуальный' } ?>
+                    <?php if ($s['is_emergency_override']): ?> · сверх лимита<?php endif; ?>
+                </span>
+            </span>
+            <span style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;
+                <?= match($s['status']) {
+                    'free' => 'background:var(--blue-light);color:var(--blue-dark);',
+                    'booked' => 'background:#fff4e0;color:#a06400;',
+                    default => 'background:#eee;color:#555;',
+                } ?>">
+                <?= match($s['status']) { 'free' => 'Свободно', 'booked' => 'Занято', default => 'Заблокировано' } ?>
+            </span>
+            <?php if ($s['status'] === 'free'): ?>
+                <form method="post" action="/admin/schedule/block" onsubmit="return confirm('Заблокировать слот?');" style="margin:0;">
+                    <input type="hidden" name="psychologist_id" value="<?= (int)$psychologist['id'] ?>">
+                    <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
+                    <button type="submit" class="btn btn-secondary" style="margin:0;padding:6px 12px;font-size:12px;">Заблокировать</button>
+                </form>
+            <?php endif; ?>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
+
+<?php require __DIR__ . '/../partials/footer.php'; ?>
+
+
+
+============================================================
+ФАЙЛ #31: templates\announcements.php
 ============================================================
 <?php $pageTitle = 'Объявления'; require __DIR__ . '/partials/header.php'; ?>
 
@@ -1728,7 +2993,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #24: templates\booking_confirmation.php
+ФАЙЛ #32: templates\booking_confirmation.php
 ============================================================
 <?php $pageTitle = 'Запись подтверждена'; require __DIR__ . '/partials/header.php'; ?>
 
@@ -1754,26 +3019,47 @@ class Router
 
 
 ============================================================
-ФАЙЛ #25: templates\booking_form.php
+ФАЙЛ #33: templates\booking_form.php
 ============================================================
-<?php $pageTitle = 'Данные для записи'; require __DIR__ . '/partials/header.php'; ?>
+<?php
+    $isPartial = $isPartial ?? false;
+    if (!$isPartial) {
+        $pageTitle = 'Данные для записи';
+        require __DIR__ . '/partials/header.php';
+    }
+?>
 
-<a href="/psychologist?id=<?= (int)$slot['psychologist_id'] ?>" class="back-link">← Назад к выбору времени</a>
+<?php if (!$isPartial): ?>
+    <a href="/psychologist?id=<?= (int)$slot['psychologist_id'] ?>" class="back-link">← Назад к выбору времени</a>
+    <h1>Заполните данные</h1>
+    <p class="subtitle">
+        <?= htmlspecialchars($slot['last_name'] . ' ' . $slot['first_name']) ?>
+        · <?= htmlspecialchars(date('d.m.Y', strtotime($slot['slot_date']))) ?>
+        · <?= htmlspecialchars(substr($slot['start_time'], 0, 5)) ?>
+    </p>
+<?php else: ?>
+    <div style="margin-bottom:12px;">
+        <div style="font-family:var(--font-display);font-weight:700;font-size:18px;">
+            <?= htmlspecialchars($slot['last_name'] . ' ' . $slot['first_name']) ?>
+        </div>
+        <div style="color:var(--text-secondary);font-size:13px;margin-top:2px;">
+            <?= htmlspecialchars(date('d.m.Y', strtotime($slot['slot_date']))) ?>
+            · <?= htmlspecialchars(substr($slot['start_time'], 0, 5)) ?>
+        </div>
+    </div>
+<?php endif; ?>
 
-<h1>Заполните данные</h1>
-<p class="subtitle">
-    <?= htmlspecialchars($slot['last_name'] . ' ' . $slot['first_name']) ?>
-    · <?= htmlspecialchars(date('d.m.Y', strtotime($slot['slot_date']))) ?>
-    · <?= htmlspecialchars(substr($slot['start_time'], 0, 5)) ?>
-</p>
-
-<form method="post" action="/book" class="card">
+<form method="post" action="/book" class="<?= $isPartial ? '' : 'card' ?>">
     <input type="hidden" name="slot_id" value="<?= (int)$slot['id'] ?>">
 
     <?php if ($loggedInClient): ?>
         <p style="font-size:14px;background:var(--blue-light);border-radius:var(--radius);padding:10px 14px;margin:0 0 4px;">
             Запись на <strong><?= htmlspecialchars($loggedInClient['last_name'] . ' ' . $loggedInClient['first_name']) ?></strong>
             <?php if ($loggedInClient['group_or_dept']): ?> · <?= htmlspecialchars($loggedInClient['group_or_dept']) ?><?php endif; ?>
+        </p>
+        <p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;">
+            <?php if (!empty($loggedInClient['phone'])): ?>Телефон: <?= htmlspecialchars($loggedInClient['phone']) ?><?php endif; ?>
+            <?php if (!empty($loggedInClient['email'])): ?> · Email: <?= htmlspecialchars($loggedInClient['email']) ?><?php endif; ?>
         </p>
     <?php else: ?>
         <label for="last_name">Фамилия *</label>
@@ -1787,19 +3073,40 @@ class Router
 
         <label for="phone">Номер телефона *</label>
         <input type="tel" id="phone" name="phone" required>
+
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com">
     <?php endif; ?>
+
+    <?php $slotFormat = $slot['format'] ?? 'individual'; ?>
+    <label for="lesson_type">Тип занятия</label>
+    <input type="hidden" name="lesson_type" value="<?= htmlspecialchars($slotFormat) ?>">
+    <select id="lesson_type" name="lesson_type_disabled" disabled>
+        <option value="individual" <?= $slotFormat === 'individual' ? 'selected' : '' ?>>Лично (индивидуально)</option>
+        <option value="group" <?= $slotFormat === 'group' ? 'selected' : '' ?>>Группа</option>
+        <option value="family" <?= $slotFormat === 'family' ? 'selected' : '' ?>>Семья</option>
+    </select>
 
     <label for="comment">Краткий запрос (по желанию)</label>
     <textarea id="comment" name="comment"></textarea>
 
-    <button type="submit" class="btn">Записаться</button>
+    <label style="display:flex;align-items:flex-start;gap:8px;font-weight:normal;margin-top:10px;">
+        <input type="checkbox" name="consent" value="1" required style="width:auto;margin-top:3px;">
+        <span style="font-size:13px;color:var(--text-secondary);">
+            Согласен(а) на обработку персональных данных
+        </span>
+    </label>
+
+    <button type="submit" class="<?= $isPartial ? 'tw-btn' : 'btn' ?>" style="<?= $isPartial ? '' : '' ?>">Записаться</button>
 </form>
 
-<?php require __DIR__ . '/partials/footer.php'; ?>
+<?php if (!$isPartial): ?>
+    <?php require __DIR__ . '/partials/footer.php'; ?>
+<?php endif; ?>
 
 
 ============================================================
-ФАЙЛ #26: templates\contacts.php
+ФАЙЛ #34: templates\contacts.php
 ============================================================
 <?php $pageTitle = 'Ссылки'; require __DIR__ . '/partials/header.php'; ?>
 
@@ -1824,7 +3131,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #27: templates\dashboard\announcements_manage.php
+ФАЙЛ #35: templates\dashboard\announcements_manage.php
 ============================================================
 <?php $pageTitle = 'Объявления — управление'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -1878,7 +3185,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #28: templates\dashboard\clients_list.php
+ФАЙЛ #36: templates\dashboard\clients_list.php
 ============================================================
 <?php $pageTitle = 'Клиенты'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -1912,7 +3219,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #29: templates\dashboard\client_cabinet.php
+ФАЙЛ #37: templates\dashboard\client_cabinet.php
 ============================================================
 <?php $pageTitle = 'Мои записи'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -1969,7 +3276,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #30: templates\dashboard\client_detail.php
+ФАЙЛ #38: templates\dashboard\client_detail.php
 ============================================================
 <?php $pageTitle = 'Карточка клиента'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -1979,6 +3286,20 @@ class Router
     <?= htmlspecialchars($client['group_or_dept'] ?? '') ?>
     <?php if ($client['phone']): ?> · <?= htmlspecialchars($client['phone']) ?><?php endif; ?>
 </p>
+
+<div class="card" style="margin-bottom:16px;">
+    <p class="section-label">Сообщение клиенту</p>
+    <p style="margin:0 0 10px;color:var(--text-secondary);font-size:13px;">
+        Это сообщение увидит клиент (в уведомлениях/почте — сейчас заглушка через `notification_log`).
+        Внутренние заметки сохраняйте ниже в истории посещений.
+    </p>
+    <form method="post" action="/dashboard/message" style="display:flex;gap:8px;">
+        <input type="hidden" name="client_id" value="<?= (int)$client['id'] ?>">
+        <input type="hidden" name="appointment_id" value="0">
+        <input type="text" name="message" placeholder="Например: «Возьмите с собой карандаши»" style="flex:1;margin:0;">
+        <button type="submit" class="btn" style="margin:0;padding:8px 14px;">Отправить</button>
+    </form>
+</div>
 
 <p class="section-label">История посещений (прошлые и будущие)</p>
 
@@ -2031,7 +3352,45 @@ class Router
 
 
 ============================================================
-ФАЙЛ #31: templates\dashboard\psychologist_home.php
+ФАЙЛ #39: templates\dashboard\profile.php
+============================================================
+<?php $pageTitle = 'Профиль психолога'; require __DIR__ . '/../partials/header.php'; ?>
+
+<a href="/dashboard" class="back-link">← Мои записи</a>
+<h1>Профиль</h1>
+<p class="subtitle">Эти данные видны студенту на карточке психолога.</p>
+
+<div class="card" style="max-width:720px;">
+    <form method="post" action="/dashboard/profile">
+        <label for="photo_path">Фото (URL или путь)</label>
+        <input type="text" id="photo_path" name="photo_path" value="<?= htmlspecialchars($profile['photo_path'] ?? '') ?>" placeholder="/assets/img/psychologist.jpg">
+
+        <label for="bio">Краткая информация (стаж, с какими проблемами работает и т.д.)</label>
+        <textarea id="bio" name="bio" rows="5" placeholder="Например: «Стаж 5 лет. Работаю с тревожностью, выгоранием, адаптацией первокурсников…»"><?= htmlspecialchars($profile['bio'] ?? '') ?></textarea>
+
+        <?php if (!empty($directions)): ?>
+            <p class="section-label" style="margin-top:16px;">Направления</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                <?php foreach ($directions as $d): ?>
+                    <?php $checked = in_array((int)$d['id'], $selected ?? [], true); ?>
+                    <label class="tw-chip" style="cursor:pointer;">
+                        <input type="checkbox" name="directions[]" value="<?= (int)$d['id'] ?>" <?= $checked ? 'checked' : '' ?> style="width:auto;margin-right:8px;">
+                        <?= htmlspecialchars($d['name']) ?>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <button type="submit" class="btn" style="margin-top:12px;">Сохранить</button>
+    </form>
+</div>
+
+<?php require __DIR__ . '/../partials/footer.php'; ?>
+
+
+
+============================================================
+ФАЙЛ #40: templates\dashboard\psychologist_home.php
 ============================================================
 <?php $pageTitle = 'Кабинет психолога'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -2044,11 +3403,14 @@ class Router
     <?php foreach ($appointments as $a): ?>
         <div class="card">
             <p class="psychologist-name" style="margin-bottom:2px;">
-                <?= htmlspecialchars($a['last_name'] . ' ' . $a['first_name'] . ' ' . ($a['patronymic'] ?? '')) ?>
+                <a href="/dashboard/clients/show?id=<?= (int)$a['client_id'] ?>" style="text-decoration:none;color:inherit;">
+                    <?= htmlspecialchars($a['last_name'] . ' ' . $a['first_name'] . ' ' . ($a['patronymic'] ?? '')) ?>
+                </a>
             </p>
             <p style="font-size:13px;color:var(--text-secondary);margin:0 0 6px;">
                 <?php if ($a['group_or_dept']): ?><?= htmlspecialchars($a['group_or_dept']) ?> · <?php endif; ?>
                 <?= htmlspecialchars($a['phone'] ?? '') ?>
+                <?php if (!empty($a['email'])): ?> · <?= htmlspecialchars($a['email']) ?><?php endif; ?>
             </p>
             <p style="font-size:13px;margin:0;">
                 <?= htmlspecialchars(date('d.m.Y', strtotime($a['slot_date']))) ?>
@@ -2057,6 +3419,12 @@ class Router
             <?php if ($a['request_comment']): ?>
                 <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0;">«<?= htmlspecialchars($a['request_comment']) ?>»</p>
             <?php endif; ?>
+
+            <form method="post" action="/dashboard/appointments/cancel" onsubmit="return confirm('Отменить запись?');"
+                  style="margin-top:12px;display:flex;justify-content:flex-end;">
+                <input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
+                <button type="submit" class="btn btn-secondary" style="margin:0;">Отменить</button>
+            </form>
         </div>
     <?php endforeach; ?>
 <?php endif; ?>
@@ -2065,7 +3433,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #32: templates\dashboard\psychologist_schedule.php
+ФАЙЛ #41: templates\dashboard\psychologist_schedule.php
 ============================================================
 <?php $pageTitle = 'Расписание'; require __DIR__ . '/../partials/header.php'; ?>
 
@@ -2146,23 +3514,59 @@ class Router
 
 
 ============================================================
-ФАЙЛ #33: templates\home.php
+ФАЙЛ #42: templates\home.php
 ============================================================
 <?php $pageTitle = 'Психологи — запись на приём'; require __DIR__ . '/partials/header.php'; ?>
 
 <h1>Выберите психолога</h1>
 <p class="subtitle">Нажмите на карточку, чтобы посмотреть свободные даты и время</p>
 
+<div class="tw-filters">
+    <div class="tw-search">
+        <input type="text" placeholder="Поиск по ФИО…" data-psych-search>
+    </div>
+    <?php if (!empty($directions)): ?>
+        <?php foreach ($directions as $d): ?>
+            <span class="tw-chip" role="button" tabindex="0" data-direction-chip="<?= (int)$d['id'] ?>">
+                <?= htmlspecialchars($d['name']) ?>
+            </span>
+        <?php endforeach; ?>
+    <?php endif; ?>
+</div>
+
 <?php if (empty($psychologists)): ?>
     <p class="empty-state">Психологи пока не добавлены в базу.</p>
 <?php else: ?>
-    <div class="psych-grid">
+    <div class="psych-grid" data-psychologists>
         <?php foreach ($psychologists as $i => $p): ?>
-            <a href="/psychologist?id=<?= (int)$p['id'] ?>" class="psychologist-card">
-                <div class="psychologist-card__cover pattern-<?= $i % 4 ?>"></div>
+            <a
+                href="/psychologist?id=<?= (int)$p['id'] ?>"
+                class="psychologist-card"
+                data-psych-card
+                data-psych-name="<?= htmlspecialchars($p['last_name'] . ' ' . $p['first_name'] . ' ' . ($p['patronymic'] ?? '')) ?>"
+                data-psych-directions="<?= htmlspecialchars($p['direction_ids'] ?? '') ?>"
+            >
+                <div class="psychologist-card__cover pattern-<?= $i % 4 ?>">
+                    <?php if (!empty($p['photo_path'])): ?>
+                        <img src="<?= htmlspecialchars($p['photo_path']) ?>" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">
+                    <?php endif; ?>
+                </div>
                 <div class="psychologist-card__body">
                     <p class="psychologist-name"><?= htmlspecialchars($p['last_name'] . ' ' . $p['first_name'] . ' ' . ($p['patronymic'] ?? '')) ?></p>
                     <p class="psychologist-tags"><?= htmlspecialchars($p['directions'] ?? '') ?></p>
+                    <?php if (!empty($p['bio'])): ?>
+                        <p style="margin:10px 0 0;color:var(--text-secondary);font-size:13px;">
+                            <?php
+                                $bioText = trim(strip_tags($p['bio']));
+                                if (function_exists('mb_strimwidth')) {
+                                    $bioText = mb_strimwidth($bioText, 0, 120, '…');
+                                } else {
+                                    $bioText = substr($bioText, 0, 120) . (strlen($bioText) > 120 ? '…' : '');
+                                }
+                            ?>
+                            <?= htmlspecialchars($bioText) ?>
+                        </p>
+                    <?php endif; ?>
                 </div>
             </a>
         <?php endforeach; ?>
@@ -2173,7 +3577,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #34: templates\login.php
+ФАЙЛ #43: templates\login.php
 ============================================================
 <?php $pageTitle = 'Вход'; require __DIR__ . '/partials/header.php'; ?>
 
@@ -2200,7 +3604,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #35: templates\partials\footer.php
+ФАЙЛ #44: templates\partials\footer.php
 ============================================================
 </div>
 </body>
@@ -2208,7 +3612,7 @@ class Router
 
 
 ============================================================
-ФАЙЛ #36: templates\partials\header.php
+ФАЙЛ #45: templates\partials\header.php
 ============================================================
 <?php
 // Для подсветки активной вкладки нав-бара — как активный пункт меню на портале.
@@ -2228,6 +3632,8 @@ function navActive(string $prefix, string $currentPath): string
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= htmlspecialchars($pageTitle ?? 'Психологическая поддержка') ?></title>
     <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/app.css">
+    <script defer src="/assets/js/app.js"></script>
 </head>
 <body>
 <header class="site-header">
@@ -2256,10 +3662,13 @@ function navActive(string $prefix, string $currentPath): string
                 ?>
                 <a href="<?= $roleLink ?>" class="<?= navActive($roleLink, $currentPath) ?>"><?= $roleLabel ?></a>
                 <?php if (\App\Core\Auth::role() === 'psychologist'): ?>
+                    <a href="/dashboard/profile" class="<?= navActive('/dashboard/profile', $currentPath) ?>">Профиль</a>
                     <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Управление объявлениями</a>
                 <?php elseif (\App\Core\Auth::role() === 'admin'): ?>
                     <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Объявления</a>
                     <a href="/admin/contacts" class="<?= navActive('/admin/contacts', $currentPath) ?>">Ссылки (упр.)</a>
+                    <a href="/admin/appointments" class="<?= navActive('/admin/appointments', $currentPath) ?>">Записи</a>
+                    <a href="/admin/notifications" class="<?= navActive('/admin/notifications', $currentPath) ?>">Уведомления</a>
                 <?php endif; ?>
             <?php endif; ?>
         </nav>
@@ -2278,51 +3687,136 @@ function navActive(string $prefix, string $currentPath): string
 
 
 ============================================================
-ФАЙЛ #37: templates\psychologist.php
+ФАЙЛ #46: templates\psychologist.php
 ============================================================
 <?php
 $pageTitle = $psychologist['last_name'] . ' ' . $psychologist['first_name'];
 require __DIR__ . '/partials/header.php';
 ?>
 
-<a href="/" class="back-link">← Все психологи</a>
+<div data-psychologist-page data-psychologist-id="<?= (int)$psychologist['id'] ?>">
+    <a href="/" class="back-link">← Все психологи</a>
 
-<h1><?= htmlspecialchars($psychologist['last_name'] . ' ' . $psychologist['first_name'] . ' ' . ($psychologist['patronymic'] ?? '')) ?></h1>
-<p class="subtitle">Выберите дату и время записи</p>
-
-<div class="card">
-    <p class="section-label">Дата</p>
-    <?php if (empty($dates)): ?>
-        <p class="empty-state">Свободных дат пока нет</p>
-    <?php else: ?>
-        <div class="date-grid">
-            <?php foreach ($dates as $date): ?>
-                <?php
-                    $isActive = $selectedDate === $date;
-                    $formatted = date('d.m, D', strtotime($date));
-                ?>
-                <a href="/psychologist?id=<?= (int)$psychologist['id'] ?>&date=<?= htmlspecialchars($date) ?>"
-                   class="pill <?= $isActive ? 'active' : '' ?>">
-                    <?= htmlspecialchars($formatted) ?>
-                </a>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-
-    <?php if ($selectedDate): ?>
-        <p class="section-label" style="margin-top:20px;">Время</p>
-        <?php if (empty($times)): ?>
-            <p class="empty-state">На эту дату свободного времени не осталось</p>
-        <?php else: ?>
-            <div class="time-grid">
-                <?php foreach ($times as $t): ?>
-                    <a href="/book?slot_id=<?= (int)$t['id'] ?>" class="pill">
-                        <?= htmlspecialchars(substr($t['start_time'], 0, 5)) ?>
-                    </a>
-                <?php endforeach; ?>
+    <div class="card">
+        <div class="tw-profile">
+            <div class="tw-profile__photo">
+                <?php if (!empty($psychologist['photo_path'])): ?>
+                    <img src="<?= htmlspecialchars($psychologist['photo_path']) ?>" alt="">
+                <?php else: ?>
+                    <?php
+                        $fn = (string)($psychologist['first_name'] ?? '');
+                        $ln = (string)($psychologist['last_name'] ?? '');
+                        if (function_exists('mb_substr')) {
+                            $initials = mb_substr($fn, 0, 1) . mb_substr($ln, 0, 1);
+                        } else {
+                            $initials = substr($fn, 0, 1) . substr($ln, 0, 1);
+                        }
+                    ?>
+                    <?= htmlspecialchars($initials) ?>
+                <?php endif; ?>
             </div>
-        <?php endif; ?>
-    <?php endif; ?>
+            <div>
+                <h1 style="margin-bottom:6px;">
+                    <?= htmlspecialchars($psychologist['last_name'] . ' ' . $psychologist['first_name'] . ' ' . ($psychologist['patronymic'] ?? '')) ?>
+                </h1>
+                <?php if (!empty($psychologist['directions'])): ?>
+                    <p class="subtitle" style="margin-bottom:10px;"><?= htmlspecialchars($psychologist['directions']) ?></p>
+                <?php else: ?>
+                    <p class="subtitle" style="margin-bottom:10px;">Психологическая консультация</p>
+                <?php endif; ?>
+
+                <div class="tw-actions-row">
+                    <button type="button" class="tw-btn" data-open-slots>Записаться</button>
+                    <a class="tw-btn tw-btn--ghost" href="/announcements">Правила и мероприятия</a>
+                </div>
+
+                <?php if (!empty($psychologist['bio'])): ?>
+                    <div style="margin-top:12px;color:var(--text-secondary);font-size:14px;">
+                        <?= nl2br(htmlspecialchars(trim(strip_tags($psychologist['bio'])))) ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fallback без JS: старый выбор через страницу -->
+    <details class="card" style="margin-top:14px;">
+        <summary style="cursor:pointer;font-weight:600;color:var(--muted);">Если модальное окно не открылось — выбрать дату/время здесь</summary>
+
+        <div style="margin-top:12px;">
+            <p class="section-label">Дата</p>
+            <?php if (empty($dates)): ?>
+                <p class="empty-state">Свободных дат пока нет</p>
+            <?php else: ?>
+                <div class="date-grid">
+                    <?php foreach ($dates as $date): ?>
+                        <?php
+                            $isActive = $selectedDate === $date;
+                            $formatted = date('d.m, D', strtotime($date));
+                        ?>
+                        <a href="/psychologist?id=<?= (int)$psychologist['id'] ?>&date=<?= htmlspecialchars($date) ?>"
+                           class="pill <?= $isActive ? 'active' : '' ?>">
+                            <?= htmlspecialchars($formatted) ?>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($selectedDate): ?>
+                <p class="section-label" style="margin-top:20px;">Время</p>
+                <?php if (empty($times)): ?>
+                    <p class="empty-state">На эту дату свободного времени не осталось</p>
+                <?php else: ?>
+                    <div class="time-grid">
+                        <?php foreach ($times as $t): ?>
+                            <a href="/book?slot_id=<?= (int)$t['id'] ?>" class="pill">
+                                <?= htmlspecialchars(substr($t['start_time'], 0, 5)) ?>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </details>
+
+    <!-- Модалка выбора даты/времени -->
+    <div class="tw-modal" id="twSlotsModal" data-modal>
+        <div class="tw-modal__dialog">
+            <div class="tw-modal__header">
+                <p class="tw-modal__title">Выберите дату и время записи</p>
+                <button class="tw-modal__close" type="button" data-modal-close aria-label="Закрыть">×</button>
+            </div>
+            <div class="tw-modal__body">
+                <div class="tw-slots">
+                    <div class="tw-slots__col">
+                        <div class="tw-slots__head">Даты</div>
+                        <div class="tw-slots__list" data-slots-dates></div>
+                    </div>
+                    <div class="tw-slots__col">
+                        <div class="tw-slots__head">Время</div>
+                        <div class="tw-slots__grid" data-slots-times></div>
+                    </div>
+                </div>
+                <div class="tw-legend" data-slots-legend></div>
+                <p style="margin:12px 0 0;font-size:12px;color:var(--text-secondary);">
+                    Цвет слота показывает формат занятия (лично / группа / семья).
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка формы записи (подгружается по /book?slot_id=...&partial=1) -->
+    <div class="tw-modal" id="twBookingFormModal" data-modal>
+        <div class="tw-modal__dialog" style="max-width:720px;">
+            <div class="tw-modal__header">
+                <p class="tw-modal__title">Данные для записи</p>
+                <button class="tw-modal__close" type="button" data-modal-close aria-label="Закрыть">×</button>
+            </div>
+            <div class="tw-modal__body">
+                <div data-booking-form-container></div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <?php require __DIR__ . '/partials/footer.php'; ?>

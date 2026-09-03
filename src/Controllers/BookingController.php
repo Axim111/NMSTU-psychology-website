@@ -21,10 +21,17 @@ class BookingController
         $selectedDate = $_GET['date'] ?? null;
 
         $stmt = $db->prepare(
-            "SELECT p.id, u.first_name, u.last_name, u.patronymic
+            "SELECT
+                p.id,
+                u.first_name, u.last_name, u.patronymic,
+                p.photo_path, p.bio,
+                GROUP_CONCAT(d.name SEPARATOR ', ') AS directions
              FROM psychologist_profiles p
              JOIN users u ON u.id = p.user_id
-             WHERE p.id = ?"
+             LEFT JOIN psychologist_directions pd ON pd.psychologist_id = p.id
+             LEFT JOIN directions d ON d.id = pd.direction_id
+             WHERE p.id = ?
+             GROUP BY p.id, u.first_name, u.last_name, u.patronymic, p.photo_path, p.bio"
         );
         $stmt->execute([$psychologistId]);
         $psychologist = $stmt->fetch();
@@ -61,12 +68,60 @@ class BookingController
     }
 
     /**
+     * GET /api/psychologist/slots?id=1
+     * JSON со свободными слотами (для модального выбора даты/времени).
+     * Возвращаем группировку по датам, чтобы фронт мог быстро рисовать список
+     * дат и тайм-слоты с цветовой маркировкой формата.
+     */
+    public function slotsApi(): void
+    {
+        $db = Database::connection();
+        $psychologistId = (int)($_GET['id'] ?? 0);
+
+        if ($psychologistId <= 0) {
+            http_response_code(422);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['error' => 'missing_id'], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        $stmt = $db->prepare(
+            "SELECT id, slot_date, start_time, format
+             FROM schedule_slots
+             WHERE psychologist_id = ? AND status = 'free' AND slot_date >= CURDATE()
+             ORDER BY slot_date, start_time"
+        );
+        $stmt->execute([$psychologistId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $byDate = [];
+        foreach ($rows as $r) {
+            $date = $r['slot_date'];
+            if (!isset($byDate[$date])) {
+                $byDate[$date] = [
+                    'date' => $date,
+                    'slots' => [],
+                ];
+            }
+            $byDate[$date]['slots'][] = [
+                'id' => (int)$r['id'],
+                'start_time' => $r['start_time'],
+                'format' => $r['format'],
+            ];
+        }
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['dates' => array_values($byDate)], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
      * GET /book?slot_id=5
      * Форма с данными клиента для выбранного слота.
      */
     public function bookForm(): void
     {
         $slotId = (int)($_GET['slot_id'] ?? 0);
+        $isPartial = (string)($_GET['partial'] ?? '') === '1';
         $slot = $this->fetchSlotWithPsychologist($slotId);
 
         if (!$slot || $slot['status'] !== 'free') {
@@ -80,7 +135,7 @@ class BookingController
         $loggedInClient = null;
         if (Auth::check() && Auth::role() === 'client') {
             $stmt = Database::connection()->prepare(
-                'SELECT last_name, first_name, patronymic, group_or_dept, phone FROM users WHERE id = ?'
+                'SELECT last_name, first_name, patronymic, group_or_dept, phone, email FROM users WHERE id = ?'
             );
             $stmt->execute([Auth::id()]);
             $loggedInClient = $stmt->fetch();
@@ -100,12 +155,19 @@ class BookingController
     {
         $slotId = (int)($_POST['slot_id'] ?? 0);
         $comment = trim($_POST['comment'] ?? '');
+        $consent = (string)($_POST['consent'] ?? '');
 
         $slot = $this->fetchSlotWithPsychologist($slotId);
 
         if (!$slot || $slot['status'] !== 'free') {
             http_response_code(409);
             echo 'Этот слот больше не доступен — возможно, его уже забронировали.';
+            return;
+        }
+
+        if ($consent !== '1') {
+            http_response_code(422);
+            echo 'Нужно согласие на обработку персональных данных.';
             return;
         }
 
@@ -117,6 +179,7 @@ class BookingController
             $firstName = trim($_POST['first_name'] ?? '');
             $group = trim($_POST['group_or_dept'] ?? '');
             $phone = trim($_POST['phone'] ?? '');
+            $email = trim($_POST['email'] ?? '');
 
             if ($lastName === '' || $firstName === '' || $phone === '') {
                 http_response_code(422);
@@ -131,12 +194,24 @@ class BookingController
             if ($isLoggedInClient) {
                 $clientId = Auth::id();
             } else {
-                $stmt = $db->prepare(
-                    "INSERT INTO users (role, last_name, first_name, group_or_dept, phone)
-                     VALUES ('client', ?, ?, ?, ?)"
-                );
-                $stmt->execute([$lastName, $firstName, $group, $phone]);
-                $clientId = (int)$db->lastInsertId();
+                $emailToSave = ($email ?? '') !== '' ? $email : null;
+
+                try {
+                    $stmt = $db->prepare(
+                        "INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email)
+                         VALUES ('client', ?, ?, ?, ?, ?)"
+                    );
+                    $stmt->execute([$lastName, $firstName, $group, $phone, $emailToSave]);
+                    $clientId = (int)$db->lastInsertId();
+                } catch (\Throwable $e) {
+                    // Если email уже занят — создаём запись без email (не мешаем записи на приём).
+                    $stmt = $db->prepare(
+                        "INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email)
+                         VALUES ('client', ?, ?, ?, ?, NULL)"
+                    );
+                    $stmt->execute([$lastName, $firstName, $group, $phone]);
+                    $clientId = (int)$db->lastInsertId();
+                }
             }
 
             $stmt = $db->prepare(
@@ -180,7 +255,7 @@ class BookingController
     private function fetchSlotWithPsychologist(int $slotId): array|false
     {
         $stmt = Database::connection()->prepare(
-            "SELECT s.id, s.slot_date, s.start_time, s.status, s.psychologist_id,
+            "SELECT s.id, s.slot_date, s.start_time, s.end_time, s.format, s.status, s.psychologist_id,
                     u.first_name, u.last_name, u.patronymic
              FROM schedule_slots s
              JOIN psychologist_profiles p ON p.id = s.psychologist_id

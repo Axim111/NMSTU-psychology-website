@@ -7,6 +7,20 @@
     <?php if ($client['phone']): ?> · <?= htmlspecialchars($client['phone']) ?><?php endif; ?>
 </p>
 
+<div class="card" style="margin-bottom:16px;">
+    <p class="section-label">Сообщение клиенту</p>
+    <p style="margin:0 0 10px;color:var(--text-secondary);font-size:13px;">
+        Это сообщение увидит клиент (в уведомлениях/почте — сейчас заглушка через `notification_log`).
+        Внутренние заметки сохраняйте ниже в истории посещений.
+    </p>
+    <form method="post" action="/dashboard/message" style="display:flex;gap:8px;">
+        <input type="hidden" name="client_id" value="<?= (int)$client['id'] ?>">
+        <input type="hidden" name="appointment_id" value="0">
+        <input type="text" name="message" placeholder="Например: «Возьмите с собой карандаши»" style="flex:1;margin:0;">
+        <button type="submit" class="btn" style="margin:0;padding:8px 14px;">Отправить</button>
+    </form>
+</div>
+
 <p class="section-label">История посещений (прошлые и будущие)</p>
 
 <?php if (empty($visits)): ?>

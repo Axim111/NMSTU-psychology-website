@@ -1,0 +1,315 @@
+/* Дополнительные компоненты поверх style.css (адаптив + модалки + календарь) */
+
+/* Запрет скролла страницы, когда открыта модалка */
+html.modal-open,
+html.modal-open body {
+  overflow: hidden;
+}
+
+/* -----------------------------
+   Chips / фильтры
+------------------------------ */
+.tw-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 18px;
+}
+
+.tw-search {
+  flex: 1;
+  min-width: 220px;
+}
+
+.tw-search input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.tw-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+.tw-chip.is-active {
+  border-color: var(--blue);
+  background: var(--blue-light);
+  color: var(--blue-dark);
+  font-weight: 600;
+}
+
+/* -----------------------------
+   Модальные окна
+------------------------------ */
+.tw-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 1000;
+}
+
+.tw-modal.is-open {
+  display: flex;
+}
+
+.tw-modal__dialog {
+  width: 100%;
+  max-width: 920px;
+  background: var(--white);
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.08);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  overflow: hidden;
+  max-height: calc(100vh - 36px);
+  display: flex;
+  flex-direction: column;
+}
+
+.tw-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tw-modal__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.tw-modal__close {
+  border: 1px solid var(--border);
+  background: var(--white);
+  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.tw-modal__close:hover {
+  color: var(--ink);
+  border-color: #cfd4da;
+}
+
+.tw-modal__body {
+  padding: 16px;
+  overflow: auto;
+}
+
+.tw-skeleton {
+  padding: 12px;
+  background: #f2f4f7;
+  border: 1px dashed #d7dde5;
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* -----------------------------
+   Выбор даты/времени
+------------------------------ */
+.tw-slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .tw-slots { grid-template-columns: 1fr; }
+}
+
+.tw-slots__col {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tw-slots__head {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.tw-slots__list {
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.tw-date-item,
+.tw-time-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--white);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.tw-date-item:hover,
+.tw-time-item:hover {
+  border-color: var(--blue);
+}
+
+.tw-date-item.is-active {
+  border-color: var(--blue);
+  background: var(--blue-light);
+  color: var(--blue-dark);
+  font-weight: 700;
+}
+
+.tw-time-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 10px;
+}
+
+.tw-slots__grid {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 720px) {
+  .tw-slots__grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 420px) {
+  .tw-slots__grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Цвета по формату */
+.tw-time-item--individual { border-left: 6px solid #4C6FE7; }
+.tw-time-item--group      { border-left: 6px solid #2F9E8F; }
+.tw-time-item--family     { border-left: 6px solid #6C63D6; }
+
+.tw-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tw-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tw-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tw-dot--individual { background: #4C6FE7; }
+.tw-dot--group      { background: #2F9E8F; }
+.tw-dot--family     { background: #6C63D6; }
+
+/* -----------------------------
+   Профиль психолога
+------------------------------ */
+.tw-profile {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 560px) {
+  .tw-profile { grid-template-columns: 1fr; }
+}
+
+.tw-profile__photo {
+  width: 120px;
+  height: 120px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.tw-profile__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tw-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--blue);
+  background: var(--blue);
+  color: #fff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tw-btn:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
+
+.tw-btn--ghost {
+  background: var(--white);
+  color: var(--blue);
+  border-color: var(--border);
+}
+
+.tw-btn--ghost:hover {
+  border-color: var(--blue);
+  color: var(--blue-dark);
+  background: var(--blue-light);
+}
+

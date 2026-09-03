@@ -27,6 +27,21 @@
         <label for="bio">О себе</label>
         <textarea id="bio" name="bio"></textarea>
 
+        <label for="photo_path">Фото (URL или путь)</label>
+        <input type="text" id="photo_path" name="photo_path" placeholder="/assets/img/psychologist.jpg">
+
+        <?php if (!empty($directions)): ?>
+            <p class="section-label" style="margin-top:16px;">Направления</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                <?php foreach ($directions as $d): ?>
+                    <label class="tw-chip" style="cursor:pointer;">
+                        <input type="checkbox" name="directions[]" value="<?= (int)$d['id'] ?>" style="width:auto;margin-right:8px;">
+                        <?= htmlspecialchars($d['name']) ?>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
         <button type="submit" class="btn">Создать</button>
     </form>
 </div>

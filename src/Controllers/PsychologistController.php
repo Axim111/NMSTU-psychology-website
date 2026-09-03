@@ -4,9 +4,72 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\Notifications\NotificationDispatcher;
+use PDO;
 
 class PsychologistController
 {
+    /**
+     * GET /dashboard/profile
+     * Профиль психолога: фото/описание/направления.
+     */
+    public function profile(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $db = Database::connection();
+        $profileStmt = $db->prepare(
+            "SELECT p.id, p.photo_path, p.bio, u.first_name, u.last_name, u.patronymic
+             FROM psychologist_profiles p
+             JOIN users u ON u.id = p.user_id
+             WHERE p.id = ?"
+        );
+        $profileStmt->execute([$psychologistId]);
+        $profile = $profileStmt->fetch();
+
+        $directions = $db->query("SELECT id, name FROM directions ORDER BY id")->fetchAll();
+        $selStmt = $db->prepare("SELECT direction_id FROM psychologist_directions WHERE psychologist_id = ?");
+        $selStmt->execute([$psychologistId]);
+        $selected = array_map('intval', $selStmt->fetchAll(PDO::FETCH_COLUMN));
+
+        require __DIR__ . '/../../templates/dashboard/profile.php';
+    }
+
+    /**
+     * POST /dashboard/profile
+     */
+    public function updateProfile(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $photoPath = trim($_POST['photo_path'] ?? '');
+        $bio = trim($_POST['bio'] ?? '');
+        $selectedDirections = $_POST['directions'] ?? [];
+
+        $db = Database::connection();
+        $db->beginTransaction();
+        try {
+            $stmt = $db->prepare("UPDATE psychologist_profiles SET photo_path = ?, bio = ? WHERE id = ?");
+            $stmt->execute([$photoPath ?: null, $bio ?: null, $psychologistId]);
+
+            $db->prepare("DELETE FROM psychologist_directions WHERE psychologist_id = ?")->execute([$psychologistId]);
+            if (is_array($selectedDirections) && !empty($selectedDirections)) {
+                $ins = $db->prepare("INSERT INTO psychologist_directions (psychologist_id, direction_id) VALUES (?, ?)");
+                foreach ($selectedDirections as $dirId) {
+                    $dirId = (int)$dirId;
+                    if ($dirId > 0) $ins->execute([$psychologistId, $dirId]);
+                }
+            }
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+        }
+
+        header('Location: /dashboard/profile');
+    }
     /**
      * GET /dashboard
      * Список ближайших записей психолога.
@@ -19,7 +82,8 @@ class PsychologistController
         $stmt = Database::connection()->prepare(
             "SELECT a.id, a.status, a.request_comment,
                     s.slot_date, s.start_time,
-                    u.last_name, u.first_name, u.patronymic, u.group_or_dept, u.phone
+                    u.id AS client_id,
+                    u.last_name, u.first_name, u.patronymic, u.group_or_dept, u.phone, u.email
              FROM appointments a
              JOIN schedule_slots s ON s.id = a.slot_id
              JOIN users u ON u.id = a.client_id
@@ -214,6 +278,131 @@ class PsychologistController
                 );
                 $stmt->execute([$appointmentId, $noteText]);
             }
+        }
+
+        header('Location: /dashboard/clients/show?id=' . $clientId);
+    }
+
+    /**
+     * POST /dashboard/appointments/cancel
+     * Отмена записи психологом (без ограничения 24ч).
+     */
+    public function cancelAppointment(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $appointmentId = (int)($_POST['appointment_id'] ?? 0);
+        if ($appointmentId <= 0) {
+            header('Location: /dashboard');
+            return;
+        }
+
+        $db = Database::connection();
+        $stmt = $db->prepare(
+            "SELECT a.id, a.slot_id, a.status, a.client_id,
+                    s.slot_date, s.start_time,
+                    cu.email, cu.last_name AS client_last_name, cu.first_name AS client_first_name
+             FROM appointments a
+             JOIN schedule_slots s ON s.id = a.slot_id
+             JOIN users cu ON cu.id = a.client_id
+             WHERE a.id = ? AND s.psychologist_id = ?"
+        );
+        $stmt->execute([$appointmentId, $psychologistId]);
+        $appointment = $stmt->fetch();
+
+        if (!$appointment || $appointment['status'] !== 'active') {
+            header('Location: /dashboard');
+            return;
+        }
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE appointments SET status = 'cancelled', cancelled_at = NOW() WHERE id = ?")
+                ->execute([$appointmentId]);
+            $db->prepare("UPDATE schedule_slots SET status = 'free' WHERE id = ?")
+                ->execute([$appointment['slot_id']]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+        }
+
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([(int)$appointment['client_id']]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Запись отменена психологом',
+                sprintf(
+                    'Ваша запись на %s в %s отменена.',
+                    date('d.m.Y', strtotime($appointment['slot_date'])),
+                    substr($appointment['start_time'], 0, 5)
+                )
+            );
+        }
+
+        header('Location: /dashboard');
+    }
+
+    /**
+     * POST /dashboard/message
+     * Сообщение клиенту (уходит в уведомления как "почта/портал" заглушка).
+     */
+    public function messageClient(): void
+    {
+        Auth::requireRole('psychologist');
+        $psychologistId = $this->psychologistProfileId();
+
+        $appointmentId = (int)($_POST['appointment_id'] ?? 0);
+        $clientId = (int)($_POST['client_id'] ?? 0);
+        $message = trim($_POST['message'] ?? '');
+
+        if ($clientId <= 0 || $message === '') {
+            header('Location: /dashboard/clients/show?id=' . $clientId);
+            return;
+        }
+
+        $db = Database::connection();
+
+        // Проверяем, что клиент вообще относится к этому психологу.
+        // Если передали appointment_id — проверяем конкретную запись; если нет — достаточно факта обращения.
+        if ($appointmentId > 0) {
+            $stmt = $db->prepare(
+                "SELECT a.id
+                 FROM appointments a
+                 JOIN schedule_slots s ON s.id = a.slot_id
+                 WHERE a.id = ? AND a.client_id = ? AND s.psychologist_id = ?"
+            );
+            $stmt->execute([$appointmentId, $clientId, $psychologistId]);
+            if (!$stmt->fetch()) {
+                header('Location: /dashboard/clients/show?id=' . $clientId);
+                return;
+            }
+        } else {
+            $stmt = $db->prepare(
+                "SELECT a.id
+                 FROM appointments a
+                 JOIN schedule_slots s ON s.id = a.slot_id
+                 WHERE a.client_id = ? AND s.psychologist_id = ?
+                 LIMIT 1"
+            );
+            $stmt->execute([$clientId, $psychologistId]);
+            if (!$stmt->fetch()) {
+                header('Location: /dashboard/clients/show?id=' . $clientId);
+                return;
+            }
+        }
+
+        $clientRow = $db->prepare('SELECT id, email, last_name, first_name FROM users WHERE id = ?');
+        $clientRow->execute([$clientId]);
+        $client = $clientRow->fetch();
+        if ($client) {
+            NotificationDispatcher::default()->notify(
+                $client,
+                'Сообщение от психолога',
+                $message
+            );
         }
 
         header('Location: /dashboard/clients/show?id=' . $clientId);
