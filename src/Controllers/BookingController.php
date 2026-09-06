@@ -133,7 +133,7 @@ class BookingController
         // Если это залогиненный клиент (кабинет студента), подтягиваем его
         // данные, чтобы форма не спрашивала ФИО/телефон заново.
         $loggedInClient = null;
-        if (Auth::check() && Auth::role() === 'client') {
+        if (Auth::check() && Auth::role() === 'student') {
             $stmt = Database::connection()->prepare(
                 'SELECT last_name, first_name, patronymic, group_or_dept, phone, email FROM users WHERE id = ?'
             );
@@ -172,7 +172,7 @@ class BookingController
         }
 
         $db = Database::connection();
-        $isLoggedInClient = Auth::check() && Auth::role() === 'client';
+        $isLoggedInClient = Auth::check() && Auth::role() === 'student';
 
         if (!$isLoggedInClient) {
             $lastName = trim($_POST['last_name'] ?? '');
@@ -199,7 +199,7 @@ class BookingController
                 try {
                     $stmt = $db->prepare(
                         "INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email)
-                         VALUES ('client', ?, ?, ?, ?, ?)"
+                         VALUES ('student', ?, ?, ?, ?, ?)"
                     );
                     $stmt->execute([$lastName, $firstName, $group, $phone, $emailToSave]);
                     $clientId = (int)$db->lastInsertId();
@@ -207,7 +207,7 @@ class BookingController
                     // Если email уже занят — создаём запись без email (не мешаем записи на приём).
                     $stmt = $db->prepare(
                         "INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email)
-                         VALUES ('client', ?, ?, ?, ?, NULL)"
+                         VALUES ('student', ?, ?, ?, ?, NULL)"
                     );
                     $stmt->execute([$lastName, $firstName, $group, $phone]);
                     $clientId = (int)$db->lastInsertId();

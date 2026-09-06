@@ -37,7 +37,7 @@ class AnnouncementController
      */
     public function manage(): void
     {
-        Auth::requireRole('psychologist', 'admin');
+        Auth::requireRole('admin', 'admin');
 
         $db = Database::connection();
         $items = $db->query(
@@ -52,7 +52,7 @@ class AnnouncementController
      */
     public function create(): void
     {
-        Auth::requireRole('psychologist', 'admin');
+        Auth::requireRole('admin', 'admin');
 
         $kind = ($_POST['kind'] ?? 'event') === 'info' ? 'info' : 'event';
         $title = trim($_POST['title'] ?? '');
@@ -75,7 +75,7 @@ class AnnouncementController
      */
     public function delete(): void
     {
-        Auth::requireRole('psychologist', 'admin');
+        Auth::requireRole('admin', 'admin');
         $id = (int)($_POST['id'] ?? 0);
 
         Database::connection()

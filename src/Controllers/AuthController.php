@@ -49,7 +49,6 @@ class AuthController
     {
         $target = match (Auth::role()) {
             'admin' => '/admin',
-            'psychologist' => '/dashboard',
             default => '/cabinet',
         };
         header('Location: ' . $target);

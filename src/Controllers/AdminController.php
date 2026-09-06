@@ -78,7 +78,7 @@ class AdminController
         try {
             $stmt = $db->prepare(
                 "INSERT INTO users (role, last_name, first_name, patronymic, email, password_hash)
-                 VALUES ('psychologist', ?, ?, ?, ?, ?)"
+                 VALUES ('admin', ?, ?, ?, ?, ?)"
             );
             $stmt->execute([
                 $lastName, $firstName, $patronymic ?: null, $email,
@@ -134,7 +134,7 @@ class AdminController
         }
 
         $stmt = Database::connection()->prepare(
-            "DELETE FROM users WHERE id = ? AND role = 'psychologist'"
+            "DELETE FROM users WHERE id = ? AND role = 'admin'"
         );
         $stmt->execute([$userId]);
 

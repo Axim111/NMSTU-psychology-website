@@ -14,8 +14,8 @@ SET @test_password_hash = '$2b$12$Sa6Ptq3Nw0F2.cw8xapuFeQyUeYGmn46n6w4fFO9xQS.8w
 
 -- Два психолога (у обоих теперь есть логин/пароль)
 INSERT INTO users (role, last_name, first_name, patronymic, email, password_hash) VALUES
-    ('psychologist', 'Филиппова', 'Елена', 'Валерьевна', 'filippova@example.com', @test_password_hash),
-    ('psychologist', 'Сергеев', 'Иван', 'Петрович', 'sergeev@example.com', @test_password_hash);
+    ('admin', 'Филиппова', 'Елена', 'Валерьевна', 'filippova@example.com', @test_password_hash),
+    ('admin', 'Сергеев', 'Иван', 'Петрович', 'sergeev@example.com', @test_password_hash);
     
 -- Администратор
 INSERT INTO users (role, last_name, first_name, email, password_hash) VALUES
@@ -23,8 +23,8 @@ INSERT INTO users (role, last_name, first_name, email, password_hash) VALUES
 
 -- Два студента с готовыми аккаунтами (кабинет студента)
 INSERT INTO users (role, last_name, first_name, group_or_dept, phone, email, password_hash) VALUES
-    ('client', 'Иванов', 'Семён', 'ИВТ-21', '+79990001122', 'student1@example.com', @test_password_hash),
-    ('client', 'Петрова', 'Анна', 'ФиИТ-22', '+79990003344', 'student2@example.com', @test_password_hash);
+    ('student', 'Иванов', 'Семён', 'ИВТ-21', '+79990001122', 'student1@example.com', @test_password_hash),
+    ('student', 'Петрова', 'Анна', 'ФиИТ-22', '+79990003344', 'student2@example.com', @test_password_hash);
 
 INSERT INTO psychologist_profiles (user_id, bio, max_hours_per_week)
 SELECT id, 'Работаю со студентами и сотрудниками вуза, индивидуальные консультации.', 9

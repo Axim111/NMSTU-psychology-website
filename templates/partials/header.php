@@ -40,17 +40,17 @@ function navActive(string $prefix, string $currentPath): string
                     <?php
                         $roleLink = match (\App\Core\Auth::role()) {
                             'admin' => '/admin',
-                            'psychologist' => '/dashboard',
+                            'admin' => '/dashboard',
                             default => '/cabinet',
                         };
                         $roleLabel = match (\App\Core\Auth::role()) {
                             'admin' => 'Админка',
-                            'psychologist' => 'Кабинет психолога',
+                            'admin' => 'Кабинет психолога',
                             default => 'Мои записи',
                         };
                     ?>
                     <a href="<?= $roleLink ?>" class="<?= navActive($roleLink, $currentPath) ?>"><?= $roleLabel ?></a>
-                    <?php if (\App\Core\Auth::role() === 'psychologist'): ?>
+                    <?php if (\App\Core\Auth::role() === 'admin'): ?>
                         <a href="/dashboard/profile" class="<?= navActive('/dashboard/profile', $currentPath) ?>">Профиль</a>
                         <a href="/dashboard/announcements" class="<?= navActive('/dashboard/announcements', $currentPath) ?>">Управление объявлениями</a>
                     <?php elseif (\App\Core\Auth::role() === 'admin'): ?>

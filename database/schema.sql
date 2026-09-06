@@ -23,7 +23,7 @@ USE psycho_booking;
 -- ------------------------------------------------------------
 CREATE TABLE users (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    role            ENUM('client', 'psychologist', 'admin') NOT NULL DEFAULT 'client',
+    role            ENUM('student', 'admin', 'admin') NOT NULL DEFAULT 'student',
     last_name       VARCHAR(100) NOT NULL,
     first_name      VARCHAR(100) NOT NULL,
     patronymic      VARCHAR(100) NULL,
