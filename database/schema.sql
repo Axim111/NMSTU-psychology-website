@@ -30,6 +30,7 @@ CREATE TABLE users (
     group_or_dept   VARCHAR(100) NULL COMMENT 'группа студента / кафедра ППС / отдел сотрудника',
     phone           VARCHAR(20)  NULL,
     email           VARCHAR(150) NULL UNIQUE,
+    contact_link    VARCHAR(255) NULL COMMENT 'ссылка для связи (ВК, телеграм и т.п.)',
     password_hash   VARCHAR(255) NULL COMMENT 'NULL пока нет своей авторизации / если вход через SSO портала',
     telegram_chat_id VARCHAR(64) NULL COMMENT 'привязывается через бота (/link команда), NULL пока не привязан',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

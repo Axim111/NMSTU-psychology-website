@@ -34,6 +34,7 @@ $router->get('/psychologist', [BookingController::class, 'show']);
 $router->get('/api/psychologist/slots', [BookingController::class, 'slotsApi']);
 $router->get('/book', [BookingController::class, 'bookForm']);
 $router->post('/book', [BookingController::class, 'store']);
+$router->post('/book-for-client', [BookingController::class, 'storeForClient']);
 
 // Вход/выход — общий для всех трёх ролей
 $router->get('/login', [AuthController::class, 'loginForm']);

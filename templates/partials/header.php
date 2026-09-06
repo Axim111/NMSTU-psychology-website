@@ -1,4 +1,7 @@
 <?php
+use App\Core\Auth;
+use App\Core\Database;
+
 // Для подсветки активной вкладки нав-бара — как активный пункт меню на портале.
 $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 function navActive(string $prefix, string $currentPath): string
@@ -7,6 +10,18 @@ function navActive(string $prefix, string $currentPath): string
         return $currentPath === '/' ? 'active' : '';
     }
     return str_starts_with($currentPath, $prefix) ? 'active' : '';
+}
+
+$psychologistsHomeLink = '/';
+$psychologistsHomeActiveFor = '/';
+if (Auth::check() && Auth::role() === 'psychologist') {
+    $stmt = Database::connection()->prepare('SELECT id FROM psychologist_profiles WHERE user_id = ?');
+    $stmt->execute([Auth::id()]);
+    $profileId = (int)($stmt->fetchColumn() ?: 0);
+    if ($profileId > 0) {
+        $psychologistsHomeLink = '/psychologist?id=' . $profileId;
+        $psychologistsHomeActiveFor = '/psychologist';
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -22,7 +37,7 @@ function navActive(string $prefix, string $currentPath): string
 <body>
 <header class="site-header" data-site-header>
     <div class="header-inner">
-        <a href="/" class="logo">
+        <a href="<?= htmlspecialchars($psychologistsHomeLink) ?>" class="logo">
             <span class="logo-mark">Ц</span>
             <span>Центр психологической поддержки</span>
         </a>
@@ -33,7 +48,7 @@ function navActive(string $prefix, string $currentPath): string
 
         <div class="nav-mobile-wrap" data-burger-menu>
             <nav class="nav-tabs">
-                <a href="/" class="<?= navActive('/', $currentPath) ?>">Психологи</a>
+                <a href="<?= htmlspecialchars($psychologistsHomeLink) ?>" class="<?= navActive($psychologistsHomeActiveFor, $currentPath) ?>">Записать клиента</a>
                 <a href="/announcements" class="<?= navActive('/announcements', $currentPath) ?>">Мероприятия</a>
                 <a href="/contacts" class="<?= navActive('/contacts', $currentPath) ?>">Ссылки</a>
                 <?php if (\App\Core\Auth::check()): ?>
