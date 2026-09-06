@@ -1,8 +1,10 @@
 /* Дополнительные компоненты поверх style.css (адаптив + модалки + календарь) */
 
-/* Запрет скролла страницы, когда открыта модалка */
+/* Запрет скролла страницы, когда открыта модалка или бургер */
 html.modal-open,
-html.modal-open body {
+html.modal-open body,
+html.burger-open,
+html.burger-open body {
   overflow: hidden;
 }
 
@@ -311,5 +313,318 @@ html.modal-open body {
   border-color: var(--blue);
   color: var(--blue-dark);
   background: var(--blue-light);
+}
+
+/* ============================================================
+   Бургер-меню — появляется на экранах ≤ 640px
+   ============================================================ */
+
+/* кнопка-бургер (три полоски) */
+.burger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  cursor: pointer;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.burger-btn span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--ink);
+  border-radius: 999px;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.burger-btn.is-open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.burger-btn.is-open span:nth-child(2) { opacity: 0; }
+.burger-btn.is-open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* мобильная выдвижная панель с навигацией */
+.nav-mobile-wrap {
+  display: contents;
+}
+
+/* ============================================================
+   АДАПТИВ — планшет 768 / телефон 640 / маленький 480
+   ============================================================ */
+
+/* ---------- Планшет (≤ 768px) ---------- */
+@media (max-width: 768px) {
+  header.site-header .header-inner {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 16px;
+    min-height: unset;
+  }
+
+  .container {
+    padding: 20px 16px 48px;
+  }
+
+  h1 { font-size: 24px; }
+
+  .time-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  .tw-modal__dialog { max-height: 94vh; }
+
+  .tw-slots { grid-template-columns: 1fr; }
+}
+
+/* ---------- Поисковая форма — в колонку синхронно с бургером (≤ 724px) ---------- */
+@media (max-width: 724px) {
+  form[method="get"][action="/"][style*="display:flex"] {
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+  }
+  form[method="get"][action="/"] > input[type="text"],
+  form[method="get"][action="/"] > select,
+  form[method="get"][action="/"] > button.btn,
+  form[method="get"][action="/"] > a.back-link {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  form[method="get"][action="/"] > button.btn {
+    margin-top: 0;
+  }
+}
+
+/* ---------- Бургер и мобильная навигация (≤ 724px) — появляется пораньше ---------- */
+@media (max-width: 724px) {
+  .burger-btn { display: inline-flex; }
+
+  .nav-mobile-wrap {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0 4px;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+  }
+
+  html.burger-open .nav-mobile-wrap,
+  .nav-mobile-wrap.is-open {
+    display: flex;
+  }
+
+  .nav-tabs {
+    order: unset;
+    flex: 1 1 auto;
+    width: 100%;
+    flex-wrap: nowrap;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .nav-tabs a {
+    width: 100%;
+    height: 44px;
+    padding: 0 12px;
+    font-size: 14px;
+    border-bottom: 2px solid transparent;
+    border-left: 3px solid transparent;
+    border-bottom-color: var(--border);
+  }
+
+  .nav-tabs a.active {
+    border-left-color: var(--blue);
+    background: var(--blue-light);
+    border-bottom-color: var(--border);
+  }
+
+  .header-actions {
+    order: unset;
+    width: 100%;
+    justify-content: flex-start;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border);
+    padding-top: 10px;
+  }
+
+  header.site-header .logo span:not(.logo-mark) {
+    font-size: 13px;
+  }
+}
+
+/* ---------- Телефон (≤ 640px) — остальная адаптивка ---------- */
+@media (max-width: 640px) {
+
+  .container { padding: 16px 14px 40px; }
+
+  h1 { font-size: 21px; }
+  .subtitle { font-size: 13px; margin-bottom: 18px; }
+
+  .card { padding: 14px; }
+
+  .psych-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .psychologist-card__cover { height: 80px; }
+
+  .date-grid { grid-template-columns: 1fr 1fr; }
+  .time-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .btn, .tw-btn {
+    width: 100%;
+    margin-top: 12px;
+  }
+  .tw-btn { margin-top: 0; }
+  .tw-actions-row .tw-btn { width: 100%; }
+
+  .info-row {
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 0;
+  }
+  .info-row .label { font-size: 12px; }
+
+  /* flex-карточки (админка / расписание / список клиентов)
+     были в 2 столбца → на телефоне в 1 */
+  .card[style*="display:flex"][style*="justify-content:space-between"],
+  .card[style*="display:flex"][style*="justify-content: space-between"],
+  a.card[style*="display:flex"],
+  div.card[style*="display:flex"][style*="align-items:center"] {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+  }
+  .card[style*="display:flex"] > div[style*="display:flex"][style*="align-items:center"],
+  .card[style*="display:flex"] > div[style*="display: flex"] {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .card[style*="display:flex"] > div[style*="text-align:right"] {
+    text-align: left !important;
+  }
+  .card[style*="display:flex"] > div[style*="display:flex"][style*="justify-content:flex-end"],
+  .card[style*="display:flex"] > form[style*="display:flex"] {
+    align-self: stretch;
+    justify-content: flex-start !important;
+    width: 100%;
+  }
+
+  /* кабинет клиента: статус + перенос формы */
+  .card > div[style*="display:flex"][style*="justify-content:space-between"] {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px;
+  }
+  .card > div[style*="display:flex"][style*="justify-content:space-between"] > span[style*="font-size:12px"] {
+    align-self: flex-start;
+  }
+
+  /* админка / записи — правая колонка влево */
+  div.card > div[style*="display:flex"][style*="justify-content:space-between"] {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  div.card > div[style*="display:flex"][style*="justify-content:space-between"] > div[style*="display:flex"][style*="flex-direction:column"] {
+    align-items: flex-start !important;
+    width: 100%;
+  }
+  div.card > div[style*="display:flex"][style*="justify-content:space-between"] > div[style*="display:flex"][style*="gap:8px"] {
+    flex-wrap: wrap;
+    align-self: stretch;
+  }
+  div.card > div[style*="display:flex"][style*="justify-content:space-between"] .tw-btn,
+  div.card > div[style*="display:flex"][style*="justify-content:space-between"] .btn {
+    width: 100%;
+  }
+
+  /* кнопки в списках — на всю ширину */
+  .card form .btn,
+  .card form .tw-btn,
+  a.tw-btn { width: 100%; }
+
+  /* расписание: слот-карточка 3 колонки → в 1 колонку, статус слева, кнопка на всю ширину */
+  .card[style*="display:flex"][style*="padding:12px"] {
+    padding: 12px 14px !important;
+  }
+  .card[style*="display:flex"][style*="padding:12px"] > span[style*="font-size:14px"] {
+    order: 1;
+  }
+  .card[style*="display:flex"][style*="padding:12px"] > span[style*="font-size:12px"] {
+    order: 2;
+    align-self: flex-start;
+  }
+  .card[style*="display:flex"][style*="padding:12px"] > form {
+    order: 3;
+    width: 100%;
+  }
+  .card[style*="display:flex"][style*="padding:12px"] > form .btn {
+    width: 100%;
+  }
+}
+
+/* ---------- Маленький телефон: психологи в 1 колонку (≤ 560px) ---------- */
+@media (max-width: 560px) {
+  body .psych-grid,
+  main .psych-grid,
+  .container .psych-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ---------- Очень узкие экраны (≤ 420px) ---------- */
+@media (max-width: 420px) {
+  header.site-header .logo span:not(.logo-mark) {
+    display: none;
+  }
+  header.site-header .logo { gap: 0; }
+
+  .container { padding: 14px 12px 32px; }
+  h1 { font-size: 19px; }
+  h2 { font-size: 17px; }
+
+  .psych-grid { grid-template-columns: 1fr; }
+
+  .btn, .tw-btn { padding: 10px 14px; font-size: 13px; }
+
+  .pill { padding: 9px 4px; font-size: 12px; }
+  .time-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .date-grid { grid-template-columns: 1fr; }
+
+  .tw-profile { grid-template-columns: 1fr; }
+  .tw-profile__photo {
+    width: 96px;
+    height: 96px;
+  }
+
+  /* кабинет: форма переноса — в 2 ряда */
+  .card > div[style*="display:flex"][style*="gap:8px"][style*="margin-top:12px"] {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .card > div[style*="display:flex"][style*="gap:8px"] form,
+  .card > div[style*="display:flex"][style*="gap:8px"] select {
+    width: 100%;
+  }
+  .card > div[style*="display:flex"][style*="gap:8px"] select { margin: 0 0 4px; }
+
+  /* модалки на весь экран почти */
+  .tw-modal { padding: 8px; }
+  .tw-modal__dialog {
+    max-width: 100%;
+    max-height: 96vh;
+    border-radius: 8px;
+  }
+  .tw-modal__body { padding: 12px; }
+  .tw-slots__grid { grid-template-columns: repeat(2, 1fr); }
 }
 

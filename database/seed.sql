@@ -16,7 +16,7 @@ SET @test_password_hash = '$2b$12$Sa6Ptq3Nw0F2.cw8xapuFeQyUeYGmn46n6w4fFO9xQS.8w
 INSERT INTO users (role, last_name, first_name, patronymic, email, password_hash) VALUES
     ('psychologist', 'Филиппова', 'Елена', 'Валерьевна', 'filippova@example.com', @test_password_hash),
     ('psychologist', 'Сергеев', 'Иван', 'Петрович', 'sergeev@example.com', @test_password_hash);
-
+    
 -- Администратор
 INSERT INTO users (role, last_name, first_name, email, password_hash) VALUES
     ('admin', 'Викторова', 'Виктория', 'admin@example.com', @test_password_hash);

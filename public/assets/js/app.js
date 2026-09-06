@@ -238,10 +238,67 @@
   }
 
   // -----------------------------
+  // Бургер-меню
+  // -----------------------------
+  function initBurgerMenu() {
+    const btn = qs('[data-burger-toggle]');
+    const menu = qs('[data-burger-menu]');
+    if (!btn || !menu) return;
+
+    const open = () => {
+      btn.classList.add('is-open');
+      menu.classList.add('is-open');
+      document.documentElement.classList.add('burger-open');
+      btn.setAttribute('aria-expanded', 'true');
+      btn.setAttribute('aria-label', 'Закрыть меню');
+    };
+
+    const close = () => {
+      btn.classList.remove('is-open');
+      menu.classList.remove('is-open');
+      document.documentElement.classList.remove('burger-open');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.setAttribute('aria-label', 'Открыть меню');
+    };
+
+    const toggle = () => {
+      if (menu.classList.contains('is-open')) {
+        close();
+      } else {
+        open();
+      }
+    };
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggle();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (menu.classList.contains('is-open')) close();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!menu.classList.contains('is-open')) return;
+      const insideMenu = e.target.closest('[data-burger-menu]');
+      const insideBtn = e.target.closest('[data-burger-toggle]');
+      if (!insideMenu && !insideBtn) close();
+    });
+
+    qsa('a', menu).forEach((link) => {
+      link.addEventListener('click', () => {
+        if (menu.classList.contains('is-open')) close();
+      });
+    });
+  }
+
+  // -----------------------------
   // Init
   // -----------------------------
   document.addEventListener('DOMContentLoaded', () => {
     initModals();
+    initBurgerMenu();
     initPsychologistsFilter();
     initBookingSlotsModal();
   });
