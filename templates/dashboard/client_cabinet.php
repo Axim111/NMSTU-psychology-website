@@ -1,7 +1,7 @@
 <?php $pageTitle = 'Мои записи'; require __DIR__ . '/../partials/header.php'; ?>
 
 <h1>Мои записи</h1>
-<p class="subtitle">Здесь видны только твои записи. Отменить можно не позже чем за 24 часа до приёма.</p>
+<p class="subtitle">Здесь видны только твои записи. Отменить или перенести можно не позже чем за 24 часа до приёма.</p>
 
 <?php if (!empty($_SESSION['cabinet_error'])): ?>
     <p style="color:#c0392b;font-size:14px;"><?= htmlspecialchars($_SESSION['cabinet_error']) ?></p>
@@ -32,18 +32,41 @@
                     <?= match($a['status']) {
                         'active' => 'background:var(--blue-light);color:var(--blue-dark);',
                         'cancelled' => 'background:#fdecea;color:#c0392b;',
+                        'rescheduled' => 'background:#fff4e0;color:#a06400;',
                         default => 'background:#eee;color:#555;',
                     } ?>">
-                    <?= match($a['status']) { 'active' => 'Активна', 'cancelled' => 'Отменена', default => 'Завершена' } ?>
+                    <?= match($a['status']) {
+                        'active' => 'Активна',
+                        'cancelled' => 'Отменена',
+                        'rescheduled' => 'Перенесена',
+                        default => 'Завершена',
+                    } ?>
                 </span>
             </div>
 
             <?php if ($a['status'] === 'active'): ?>
-                <form method="post" action="/cabinet/cancel" style="margin-top:12px;"
-                      onsubmit="return confirm('Отменить запись?');">
-                    <input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
-                    <button type="submit" class="btn btn-secondary" style="margin-top:0;">Отменить запись</button>
-                </form>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;">
+                    <form method="post" action="/cabinet/cancel" onsubmit="return confirm('Отменить запись?');">
+                        <input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
+                        <button type="submit" class="btn btn-secondary" style="margin-top:0;">Отменить запись</button>
+                    </form>
+
+                    <?php $freeSlots = $availableSlotsByPsychologist[$a['psychologist_id']] ?? []; ?>
+                    <?php if ($freeSlots): ?>
+                        <form method="post" action="/cabinet/reschedule" style="display:flex;gap:6px;align-items:center;">
+                            <input type="hidden" name="appointment_id" value="<?= (int)$a['id'] ?>">
+                            <select name="new_slot_id" style="margin:0;width:auto;">
+                                <?php foreach ($freeSlots as $slot): ?>
+                                    <option value="<?= (int)$slot['id'] ?>">
+                                        <?= htmlspecialchars(date('d.m.Y', strtotime($slot['slot_date']))) ?>,
+                                        <?= htmlspecialchars(substr($slot['start_time'], 0, 5)) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="submit" class="btn btn-secondary" style="margin-top:0;">Перенести</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
         </div>
     <?php endforeach; ?>

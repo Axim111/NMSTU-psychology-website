@@ -11,8 +11,7 @@
 -- проблему лечили флагом --default-character-set=utf8mb4 у команды
 -- mysql, но Docker сам решает, как запускать импорт, поэтому кодировку
 -- надёжнее зашить в сам файл.
-
--- SET NAMES utf8mb4;
+SET NAMES utf8mb4;
 
 -- CREATE DATABASE IF NOT EXISTS psycho_booking
 --     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -32,6 +31,7 @@ CREATE TABLE users (
     phone           VARCHAR(20)  NULL,
     email           VARCHAR(150) NULL UNIQUE,
     password_hash   VARCHAR(255) NULL COMMENT 'NULL пока нет своей авторизации / если вход через SSO портала',
+    telegram_chat_id VARCHAR(64) NULL COMMENT 'привязывается через бота (/link команда), NULL пока не привязан',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -86,17 +86,26 @@ CREATE TABLE schedule_slots (
 
 -- ------------------------------------------------------------
 -- Записи (появляется когда клиент бронирует слот)
+-- status — состояние записи:
+--   active      — обычная активная запись
+--   cancelled   — отменена (клиентом или админом/психологом)
+--   completed   — приём состоялся
+--   rescheduled — перенесена на другой слот; rescheduled_to_id
+--                 указывает на новую запись, которая её заменила
+--                 (старая строка остаётся в истории, не удаляется)
 -- ------------------------------------------------------------
 CREATE TABLE appointments (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    slot_id         INT UNSIGNED NOT NULL UNIQUE,
-    client_id       INT UNSIGNED NOT NULL,
-    request_comment VARCHAR(500) NULL COMMENT 'краткий запрос клиента, по желанию',
-    status          ENUM('active', 'cancelled', 'completed') NOT NULL DEFAULT 'active',
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    cancelled_at    DATETIME NULL,
+    id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    slot_id            INT UNSIGNED NOT NULL UNIQUE,
+    client_id          INT UNSIGNED NOT NULL,
+    request_comment    VARCHAR(500) NULL COMMENT 'краткий запрос клиента, по желанию',
+    status             ENUM('active', 'cancelled', 'completed', 'rescheduled') NOT NULL DEFAULT 'active',
+    rescheduled_to_id  INT UNSIGNED NULL COMMENT 'на какую запись перенесли (если status = rescheduled)',
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    cancelled_at       DATETIME NULL,
     FOREIGN KEY (slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE,
-    FOREIGN KEY (client_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (client_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (rescheduled_to_id) REFERENCES appointments(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
@@ -145,7 +154,7 @@ CREATE TABLE contacts (
 CREATE TABLE notification_log (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id         INT UNSIGNED NOT NULL,
-    channel         ENUM('email', 'portal') NOT NULL,
+    channel         ENUM('email', 'portal', 'telegram') NOT NULL,
     subject         VARCHAR(200) NOT NULL,
     message         TEXT NOT NULL,
     status          ENUM('stub', 'sent', 'failed') NOT NULL DEFAULT 'stub'

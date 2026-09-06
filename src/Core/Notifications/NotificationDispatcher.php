@@ -29,6 +29,7 @@ class NotificationDispatcher
         return new self([
             new EmailNotifier(),
             new PortalNotifier(),
+            new TelegramNotifier(),
         ]);
     }
 

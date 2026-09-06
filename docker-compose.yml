@@ -1,3 +1,4 @@
+name: my_project_name
 services:
   nginx:
     image: nginx:1.25-alpine
@@ -57,6 +58,26 @@ services:
       - db_data:/var/lib/mysql
     networks:
       - app-network
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: docker/telegram-bot/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: psycho_booking
+      DB_USER: app
+      DB_PASSWORD: app
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      - ./:/var/www/html
+    networks:
+      - app-network
+    restart: unless-stopped
 
 volumes:
   db_data:

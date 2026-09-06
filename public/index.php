@@ -43,6 +43,7 @@ $router->get('/logout', [AuthController::class, 'logout']);
 // Кабинет студента/ППС
 $router->get('/cabinet', [ClientController::class, 'cabinet']);
 $router->post('/cabinet/cancel', [ClientController::class, 'cancel']);
+$router->post('/cabinet/reschedule', [ClientController::class, 'reschedule']);
 
 // Кабинет психолога
 $router->get('/dashboard', [PsychologistController::class, 'dashboard']);

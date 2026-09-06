@@ -22,6 +22,7 @@ require __DIR__ . '/../src/Core/Database.php';
 require __DIR__ . '/../src/Core/Notifications/NotifierInterface.php';
 require __DIR__ . '/../src/Core/Notifications/EmailNotifier.php';
 require __DIR__ . '/../src/Core/Notifications/PortalNotifier.php';
+require __DIR__ . '/../src/Core/Notifications/TelegramNotifier.php';
 require __DIR__ . '/../src/Core/Notifications/NotificationDispatcher.php';
 
 use App\Core\Database;
