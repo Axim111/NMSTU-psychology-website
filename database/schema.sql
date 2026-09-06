@@ -19,11 +19,11 @@ SET NAMES utf8mb4;
 USE psycho_booking;
 
 -- ------------------------------------------------------------
--- Пользователи (общая таблица для всех ролей)
+-- Пользователи: ровно две роли — student и admin
 -- ------------------------------------------------------------
 CREATE TABLE users (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    role            ENUM('student', 'admin', 'admin') NOT NULL DEFAULT 'student',
+    role            ENUM('student', 'admin') NOT NULL DEFAULT 'student',
     last_name       VARCHAR(100) NOT NULL,
     first_name      VARCHAR(100) NOT NULL,
     patronymic      VARCHAR(100) NULL,
@@ -37,6 +37,7 @@ CREATE TABLE users (
 
 -- ------------------------------------------------------------
 -- Профиль психолога (доп. данные поверх users)
+-- В системе психолог — сотрудник с ролью admin.
 -- ------------------------------------------------------------
 CREATE TABLE psychologist_profiles (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -85,14 +86,7 @@ CREATE TABLE schedule_slots (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- Записи (появляется когда клиент бронирует слот)
--- status — состояние записи:
---   active      — обычная активная запись
---   cancelled   — отменена (клиентом или админом/психологом)
---   completed   — приём состоялся
---   rescheduled — перенесена на другой слот; rescheduled_to_id
---                 указывает на новую запись, которая её заменила
---                 (старая строка остаётся в истории, не удаляется)
+-- Записи
 -- ------------------------------------------------------------
 CREATE TABLE appointments (
     id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -109,7 +103,7 @@ CREATE TABLE appointments (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- Заметки психолога к записи (видны только психологам)
+-- Заметки психолога к записи (видны только администраторам-психологам)
 -- ------------------------------------------------------------
 CREATE TABLE appointment_notes (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -124,8 +118,7 @@ CREATE TABLE appointment_notes (
 -- ------------------------------------------------------------
 CREATE TABLE announcements (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    kind            ENUM('event', 'info') NOT NULL DEFAULT 'event'
-                    COMMENT 'event — групповое мероприятие, info — правила/памятки (посещение, отмена, экстренная помощь)',
+    kind            ENUM('event', 'info') NOT NULL DEFAULT 'event',
     title           VARCHAR(200) NOT NULL,
     content         TEXT NOT NULL,
     event_date      DATETIME NULL,
@@ -135,7 +128,7 @@ CREATE TABLE announcements (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- Прочие контакты для связи (телефон экстренной помощи и т.п.)
+-- Прочие контакты для связи
 -- ------------------------------------------------------------
 CREATE TABLE contacts (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -145,11 +138,7 @@ CREATE TABLE contacts (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- Лог уведомлений (заглушка). Реальная отправка (почта портала,
--- колокольчик на портале) пока не подключена — см.
--- src/Core/Notifications/. Каждая "отправка" просто пишется сюда,
--- чтобы было видно, что сработало бы и когда, до подключения
--- настоящих каналов.
+-- Лог уведомлений
 -- ------------------------------------------------------------
 CREATE TABLE notification_log (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -157,8 +146,7 @@ CREATE TABLE notification_log (
     channel         ENUM('email', 'portal', 'telegram') NOT NULL,
     subject         VARCHAR(200) NOT NULL,
     message         TEXT NOT NULL,
-    status          ENUM('stub', 'sent', 'failed') NOT NULL DEFAULT 'stub'
-                    COMMENT 'stub — заглушка, реально никуда не отправлено',
+    status          ENUM('stub', 'sent', 'failed') NOT NULL DEFAULT 'stub',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
