@@ -6,16 +6,11 @@ use App\Core\Auth;
 use App\Core\Database;
 
 /**
- * kind='event' — групповые мероприятия/объявления Центра (видны всем).
- * kind='info'  — правила посещения, отмены записи, экстренная помощь (видны всем).
- * Создавать/редактировать может психолог или админ (по ТЗ это вносит психолог).
+ * Объявления и информационные памятки Центра.
+ * Управление доступно роли admin; психолог в системе является admin.
  */
 class AnnouncementController
 {
-    /**
-     * GET /announcements
-     * Публичная страница — список мероприятий + информационные памятки.
-     */
     public function index(): void
     {
         $db = Database::connection();
@@ -31,13 +26,9 @@ class AnnouncementController
         require __DIR__ . '/../../templates/announcements.php';
     }
 
-    /**
-     * GET /dashboard/announcements
-     * Управление — доступно психологу и админу.
-     */
     public function manage(): void
     {
-        Auth::requireRole('psychologist', 'admin');
+        Auth::requireRole('admin');
 
         $db = Database::connection();
         $items = $db->query(
@@ -47,12 +38,9 @@ class AnnouncementController
         require __DIR__ . '/../../templates/dashboard/announcements_manage.php';
     }
 
-    /**
-     * POST /dashboard/announcements
-     */
     public function create(): void
     {
-        Auth::requireRole('psychologist', 'admin');
+        Auth::requireRole('admin');
 
         $kind = ($_POST['kind'] ?? 'event') === 'info' ? 'info' : 'event';
         $title = trim($_POST['title'] ?? '');
@@ -70,12 +58,9 @@ class AnnouncementController
         header('Location: /dashboard/announcements');
     }
 
-    /**
-     * POST /dashboard/announcements/delete
-     */
     public function delete(): void
     {
-        Auth::requireRole('psychologist', 'admin');
+        Auth::requireRole('admin');
         $id = (int)($_POST['id'] ?? 0);
 
         Database::connection()

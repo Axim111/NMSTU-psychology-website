@@ -14,7 +14,7 @@ class ClientController
      */
     public function cabinet(): void
     {
-        Auth::requireRole('client');
+        Auth::requireRole('student');
 
         $stmt = Database::connection()->prepare(
             "SELECT a.id, a.status, a.request_comment,
@@ -56,7 +56,7 @@ class ClientController
      */
     public function cancel(): void
     {
-        Auth::requireRole('client');
+        Auth::requireRole('student');
 
         $appointmentId = (int) ($_POST['appointment_id'] ?? 0);
         $db = Database::connection();
@@ -126,7 +126,7 @@ class ClientController
      */
     public function reschedule(): void
     {
-        Auth::requireRole('client');
+        Auth::requireRole('student');
 
         $appointmentId = (int) ($_POST['appointment_id'] ?? 0);
         $newSlotId = (int) ($_POST['new_slot_id'] ?? 0);

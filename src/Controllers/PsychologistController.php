@@ -15,7 +15,7 @@ class PsychologistController
      */
     public function profile(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $db = Database::connection();
@@ -41,7 +41,7 @@ class PsychologistController
      */
     public function updateProfile(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $photoPath = trim($_POST['photo_path'] ?? '');
@@ -76,7 +76,7 @@ class PsychologistController
      */
     public function dashboard(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $stmt = Database::connection()->prepare(
@@ -102,7 +102,7 @@ class PsychologistController
      */
     public function schedule(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $stmt = Database::connection()->prepare(
@@ -128,7 +128,7 @@ class PsychologistController
      */
     public function addSlot(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $date = $_POST['slot_date'] ?? '';
@@ -183,7 +183,7 @@ class PsychologistController
      */
     public function clients(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $stmt = Database::connection()->prepare(
@@ -209,12 +209,12 @@ class PsychologistController
      */
     public function clientDetail(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
         $clientId = (int)($_GET['id'] ?? 0);
 
         $stmtClient = Database::connection()->prepare(
-            'SELECT id, last_name, first_name, patronymic, group_or_dept, phone FROM users WHERE id = ? AND role = "client"'
+            'SELECT id, last_name, first_name, patronymic, group_or_dept, phone FROM users WHERE id = ? AND role = "student"'
         );
         $stmtClient->execute([$clientId]);
         $client = $stmtClient->fetch();
@@ -255,7 +255,7 @@ class PsychologistController
      */
     public function addNote(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $appointmentId = (int)($_POST['appointment_id'] ?? 0);
@@ -289,7 +289,7 @@ class PsychologistController
      */
     public function cancelAppointment(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $appointmentId = (int)($_POST['appointment_id'] ?? 0);
@@ -351,7 +351,7 @@ class PsychologistController
      */
     public function messageClient(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
 
         $appointmentId = (int)($_POST['appointment_id'] ?? 0);
@@ -414,7 +414,7 @@ class PsychologistController
      */
     public function blockSlot(): void
     {
-        Auth::requireRole('psychologist');
+        Auth::requireRole('admin');
         $psychologistId = $this->psychologistProfileId();
         $slotId = (int)($_POST['slot_id'] ?? 0);
 

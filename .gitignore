@@ -1,3 +1,7 @@
 pars.js
 out.js
 output.txt
+# IDE / local / generated files
+.DS_Store
+.idea/
+NMSTUsite.zip
